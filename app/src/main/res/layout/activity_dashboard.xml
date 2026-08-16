@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/panel_background"
+    android:orientation="vertical"
+    android:padding="8dp">
+
+    <TextView
+        android:id="@+id/apiUsageText"
+        android:layout_width="match_parent"
+        android:layout_height="36dp"
+        android:gravity="center_vertical|end"
+        android:paddingEnd="8dp"
+        android:text="@string/api_usage_demo"
+        android:textColor="@color/text_secondary"
+        android:textSize="15sp"
+        android:textStyle="bold" />
+
+    <com.digihori.marketpanel.ui.dashboard.MarketPanelView
+        android:id="@+id/mainPanel"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="2"
+        android:background="@drawable/panel_background" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="8dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <com.digihori.marketpanel.ui.dashboard.MarketPanelView
+            android:id="@+id/intradayPanel"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginEnd="4dp"
+            android:layout_weight="1"
+            android:background="@drawable/panel_background" />
+
+        <com.digihori.marketpanel.ui.dashboard.MarketPanelView
+            android:id="@+id/marketPanel"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:background="@drawable/panel_background" />
+    </LinearLayout>
+
+    <ProgressBar
+        android:id="@+id/rotationProgress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="4dp"
+        android:layout_marginTop="4dp"
+        android:max="1000"
+        android:progress="0"
+        android:progressBackgroundTint="@color/panel_divider"
+        android:progressTint="@color/chart_primary" />
+</LinearLayout>

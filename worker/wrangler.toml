@@ -1,0 +1,11 @@
+name = "marketpanel-api"
+main = "src/index.js"
+compatibility_date = "2026-08-16"
+
+[vars]
+UPSTREAM_BASE_URL = "https://api.twelvedata.com"
+CACHE_TTL_SECONDS = "300"
+
+[[kv_namespaces]]
+binding = "MARKET_CACHE"
+id = "eddf69c6371645829fb4e10af1e73d54"

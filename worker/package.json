@@ -1,0 +1,9 @@
+{
+  "name": "marketpanel-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "verify-api": "node scripts/verify-api.mjs"
+  }
+}

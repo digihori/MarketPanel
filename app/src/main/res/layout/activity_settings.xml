@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/panel_background"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/settings_title"
+        android:textColor="@color/text_primary"
+        android:textSize="24sp"
+        android:textStyle="bold" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="12dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:layout_width="240dp"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:paddingEnd="20dp">
+
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/rotation_interval" android:textColor="@color/text_secondary" />
+            <Spinner android:id="@+id/rotationIntervalSpinner" android:layout_width="match_parent" android:layout_height="48dp" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="@string/data_update_interval" android:textColor="@color/text_secondary" />
+            <Spinner android:id="@+id/updateIntervalSpinner" android:layout_width="match_parent" android:layout_height="48dp" />
+            <CheckBox android:id="@+id/autoStart" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/auto_start" android:textColor="@color/text_primary" />
+            <CheckBox android:id="@+id/keepScreenOn" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/keep_screen_on" android:textColor="@color/text_primary" />
+            <CheckBox android:id="@+id/fullscreen" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/fullscreen" android:textColor="@color/text_primary" />
+            <Button android:id="@+id/apiLogButton" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="12dp" android:text="APIログ" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="銘柄とデータ供給元" android:textColor="@color/text_primary" android:textSize="18sp" android:textStyle="bold" />
+                <Button android:id="@+id/addInstrumentButton" android:layout_width="wrap_content" android:layout_height="44dp" android:text="＋ 銘柄追加" />
+            </LinearLayout>
+
+            <ScrollView
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_marginTop="8dp"
+                android:layout_weight="1">
+                <LinearLayout
+                    android:id="@+id/instrumentList"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+            </ScrollView>
+        </LinearLayout>
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/saveButton"
+        android:layout_width="160dp"
+        android:layout_height="48dp"
+        android:layout_gravity="end"
+        android:text="@string/save" />
+</LinearLayout>

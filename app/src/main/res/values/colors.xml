@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="panel_background">#0A0F16</color>
+    <color name="panel_surface">#111923</color>
+    <color name="panel_divider">#263444</color>
+    <color name="text_primary">#F2F5F8</color>
+    <color name="text_secondary">#96A5B5</color>
+    <color name="price_up">#31D08B</color>
+    <color name="price_down">#FF6376</color>
+    <color name="chart_primary">#45A3FF</color>
+    <color name="chart_secondary">#9C7CFF</color>
+</resources>

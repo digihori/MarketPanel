@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MarketPanel</string>
+    <string name="updated_at">更新 15:00</string>
+    <string name="main_period">1年・週足</string>
+    <string name="intraday_period">本日・5分足</string>
+    <string name="settings_title">MarketPanel 設定</string>
+    <string name="rotation_interval">表示切替周期</string>
+    <string name="main_chart_period">MAINチャート期間</string>
+    <string name="data_update_interval">データ更新間隔</string>
+    <string name="stocks_to_show">米国株・ETF／国内ETF</string>
+    <string name="funds_to_show">国内投信</string>
+    <string name="markets_to_show">表示する市場指標</string>
+    <string name="monitor_settings">常設モニター設定</string>
+    <string name="auto_start">端末起動後に自動表示</string>
+    <string name="keep_screen_on">画面を常時点灯</string>
+    <string name="fullscreen">フルスクリーン表示</string>
+    <string name="save">保存</string>
+    <string name="settings_hint">ダッシュボードを長押しすると設定を開けます</string>
+    <string name="api_usage_demo">API DEMO</string>
+</resources>
