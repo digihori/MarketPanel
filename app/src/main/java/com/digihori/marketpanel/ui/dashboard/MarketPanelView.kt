@@ -11,6 +11,11 @@ import com.digihori.marketpanel.R
 import com.digihori.marketpanel.domain.model.PanelData
 import kotlin.math.max
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.floor
+import kotlin.math.log10
+import kotlin.math.pow
+import kotlin.math.roundToInt
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -37,7 +42,7 @@ class MarketPanelView @JvmOverloads constructor(
     fun submit(value: PanelData) {
         data = value
         chartPaint.color = color(if (value.isPositive) R.color.chart_primary else R.color.price_down)
-        contentDescription = "${value.title} ${value.price} ${value.change}"
+        contentDescription = "${value.title} ${value.price} 前日比 ${value.change}"
         invalidate()
     }
 
@@ -73,7 +78,7 @@ class MarketPanelView @JvmOverloads constructor(
             value.title,
             left,
             57f * density,
-            chartLeft - left - 14f * density,
+            chartLeft - left - 48f * density,
             if (compact) 21f else 25f,
         )
         val extraTitleHeight = (titleLines - 1) * 27f
@@ -83,7 +88,7 @@ class MarketPanelView @JvmOverloads constructor(
         drawText(canvas, value.price, left, priceY * density, if (compact) 27f else 35f, R.color.text_primary)
         drawText(
             canvas,
-            value.change,
+            "前日比 ${value.change}",
             left,
             (priceY + if (compact) 29f else 37f) * density,
             if (compact) 16f else 19f,
@@ -93,7 +98,7 @@ class MarketPanelView @JvmOverloads constructor(
         if (value.points.isNotEmpty()) {
             val chartTop = 50f * density
             val chartBottom = height - 52f * density
-            drawGrid(canvas, chartLeft, chartTop, right, chartBottom)
+            drawGrid(canvas, value.points, chartLeft, chartTop, right, chartBottom)
             drawChart(canvas, value.points, chartLeft, chartTop, right, chartBottom)
             drawAxes(canvas, value, chartLeft, chartTop, right, chartBottom)
         }
@@ -113,9 +118,18 @@ class MarketPanelView @JvmOverloads constructor(
         canvas.drawText(statusText, x, 25f * density, textPaint)
     }
 
-    private fun drawGrid(canvas: Canvas, left: Float, top: Float, right: Float, bottom: Float) {
-        repeat(4) { index ->
-            val y = top + (bottom - top) * index / 3f
+    private fun drawGrid(
+        canvas: Canvas,
+        points: List<Float>,
+        left: Float,
+        top: Float,
+        right: Float,
+        bottom: Float,
+    ) {
+        val bounds = calculateChartBounds(points) ?: return
+        val range = bounds.maximum - bounds.minimum
+        calculateAxisTicks(bounds).forEach { tick ->
+            val y = bottom - (bottom - top) * (tick - bounds.minimum) / range
             canvas.drawLine(left, y, right, y, gridPaint)
         }
     }
@@ -149,10 +163,17 @@ class MarketPanelView @JvmOverloads constructor(
         bottom: Float,
     ) {
         val bounds = calculateChartBounds(value.points) ?: return
-        val middle = (bounds.minimum + bounds.maximum) / 2f
-        drawAxisText(canvas, axisValue(bounds.maximum, value.axisUnit), left - 6f * density, top + 3f * density, Paint.Align.RIGHT)
-        drawAxisText(canvas, axisValue(middle, value.axisUnit), left - 6f * density, (top + bottom) / 2f + 3f * density, Paint.Align.RIGHT)
-        drawAxisText(canvas, axisValue(bounds.minimum, value.axisUnit), left - 6f * density, bottom + 3f * density, Paint.Align.RIGHT)
+        val range = bounds.maximum - bounds.minimum
+        calculateAxisTicks(bounds).forEach { tick ->
+            val y = bottom - (bottom - top) * (tick - bounds.minimum) / range
+            drawAxisText(
+                canvas,
+                axisValue(tick, value.axisUnit),
+                left - 6f * density,
+                y + 3f * density,
+                Paint.Align.RIGHT,
+            )
+        }
 
         val labels = value.xAxisLabels
         if (labels.isNotEmpty()) {
@@ -216,6 +237,7 @@ class MarketPanelView @JvmOverloads constructor(
 
     private fun axisValue(value: Float, unit: String): String {
         val formatter = NumberFormat.getNumberInstance(Locale.US).apply {
+            minimumFractionDigits = if (unit == "USD" || unit == "RATE") 2 else 0
             maximumFractionDigits = if (unit == "JPY") 0 else 2
         }
         val formatted = formatter.format(value)
@@ -266,4 +288,33 @@ internal fun calculateChartBounds(points: List<Float>): ChartBounds? {
         max(abs(dataMinimum) * 0.05f, 1f)
     }
     return ChartBounds(dataMinimum - padding, dataMaximum + padding)
+}
+
+internal fun calculateAxisTicks(bounds: ChartBounds): List<Float> {
+    val range = bounds.maximum - bounds.minimum
+    if (!range.isFinite() || range <= 0f) return emptyList()
+    val step = niceStep(range / 3f)
+    val first = ceil(bounds.minimum / step) * step
+    val ticks = mutableListOf<Float>()
+    var tick = first
+    while (tick <= bounds.maximum + step * 0.001f && ticks.size < 4) {
+        // Remove insignificant floating point noise before formatting.
+        ticks += (tick / step).roundToInt() * step
+        tick += step
+    }
+    return ticks
+}
+
+private fun niceStep(value: Float): Float {
+    if (!value.isFinite() || value <= 0f) return 1f
+    val magnitude = 10f.pow(floor(log10(value)))
+    val normalized = value / magnitude
+    val factor = when {
+        normalized < 1.5f -> 1f
+        normalized < 2.25f -> 2f
+        normalized < 3.75f -> 2.5f
+        normalized < 7.5f -> 5f
+        else -> 10f
+    }
+    return factor * magnitude
 }

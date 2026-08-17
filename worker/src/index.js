@@ -1,7 +1,21 @@
 const MARKET_SYMBOLS = {
-  NIKKEI225: "N225",
-  SP500: "SPX",
+  // Direct index symbols return 404 on the Twelve Data Basic plan.
+  // Use US-listed ETF proxies that are available on the free plan.
+  NIKKEI225: "EWJ",
+  SP500: "VOO",
+  DOW30: "DIA",
+  NASDAQ100: "QQQ",
+  VIX: "VIXY",
   USDJPY: "USD/JPY",
+};
+
+const MARKET_NAMES = {
+  NIKKEI225: "日本株参考（EWJ）",
+  SP500: "S&P 500参考（VOO）",
+  DOW30: "NYダウ参考（DIA）",
+  NASDAQ100: "NASDAQ-100参考（QQQ）",
+  VIX: "VIX短期先物参考（VIXY）",
+  USDJPY: "米ドル／円",
 };
 
 export default {
@@ -58,7 +72,7 @@ export async function handleRequest(request, env, cache, fetchImpl, context = nu
 function kvTtl(parts) {
   if (parts[1] === "charts") return 24 * 60 * 60;
   if (parts[1] === "quotes" || parts[1] === "markets") return 2 * 60 * 60;
-  if (parts[1] === "usage") return 15 * 60;
+  if (parts[1] === "usage") return 60 * 60;
   return 5 * 60;
 }
 
@@ -91,7 +105,7 @@ async function usageResponse(env, fetchImpl) {
       minuteLimit: Number(upstream.plan_limit) || 8,
     },
     200,
-    900,
+    3600,
   );
 }
 
@@ -127,10 +141,12 @@ async function marketResponse(id, env, fetchImpl) {
     upstreamJson("quote", { symbol }, env, fetchImpl),
     upstreamJson("time_series", { symbol, interval: "1day", outputsize: "60", order: "ASC" }, env, fetchImpl),
   ]);
+  const mappedQuote = mapQuote(quote, id);
+  mappedQuote.name = MARKET_NAMES[id] || mappedQuote.name;
   return apiJson(
     {
       id,
-      quote: mapQuote(quote, id),
+      quote: mappedQuote,
       points: mapPoints(series.values),
     },
     env,

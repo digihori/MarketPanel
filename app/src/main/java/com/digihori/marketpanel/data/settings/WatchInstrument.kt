@@ -23,7 +23,7 @@ enum class AssetType(val label: String) {
 @Serializable
 enum class InstrumentDataSource(val label: String) {
     TWELVE_DATA("Twelve Data"),
-    REFERENCE_USD_JPY("参考指標（円換算）"),
+    REFERENCE_USD_JPY("参照ETF（外貨建て）"),
     DEMO("デモ／手動"),
 }
 
@@ -42,6 +42,27 @@ object DefaultWatchInstruments {
         WatchInstrument("ref_sp500", "eMAXIS Slim S&P500参考", "VOO", AssetType.FUND_REFERENCE, InstrumentDataSource.REFERENCE_USD_JPY),
         WatchInstrument("market_nikkei", "日経平均", "NIKKEI225", AssetType.MARKET_INDEX, InstrumentDataSource.TWELVE_DATA),
         WatchInstrument("market_sp500", "S&P 500", "SP500", AssetType.MARKET_INDEX, InstrumentDataSource.TWELVE_DATA),
+        WatchInstrument("market_dow30", "NYダウ参考（DIA）", "DOW30", AssetType.MARKET_INDEX, InstrumentDataSource.TWELVE_DATA),
+        WatchInstrument("market_nasdaq100", "NASDAQ-100参考（QQQ）", "NASDAQ100", AssetType.MARKET_INDEX, InstrumentDataSource.TWELVE_DATA),
+        WatchInstrument("market_vix", "VIX短期先物参考（VIXY）", "VIX", AssetType.MARKET_INDEX, InstrumentDataSource.TWELVE_DATA),
         WatchInstrument("market_usdjpy", "米ドル／円", "USDJPY", AssetType.MARKET_INDEX, InstrumentDataSource.TWELVE_DATA),
     )
+}
+
+internal fun resolveMainInstrumentDisplayNames(
+    instruments: List<WatchInstrument>,
+    resolvedNames: Map<String, String>,
+): List<WatchInstrument> = instruments.map { item ->
+    val resolved = resolvedNames[item.symbol]?.trim().orEmpty()
+    val canAutoUpdate = item.assetType == AssetType.US_STOCK || item.assetType == AssetType.US_ETF
+    if (
+        canAutoUpdate &&
+        item.displayName.equals(item.symbol, ignoreCase = true) &&
+        resolved.isNotBlank() &&
+        !resolved.equals(item.symbol, ignoreCase = true)
+    ) {
+        item.copy(displayName = resolved)
+    } else {
+        item
+    }
 }

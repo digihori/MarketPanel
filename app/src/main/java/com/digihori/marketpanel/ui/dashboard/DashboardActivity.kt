@@ -1,7 +1,11 @@
 package com.digihori.marketpanel.ui.dashboard
 
 import android.app.Activity
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
 import android.os.Bundle
 import android.view.View
 import android.view.WindowManager
@@ -20,6 +24,7 @@ import com.digihori.marketpanel.data.repository.LoadedValue
 import com.digihori.marketpanel.data.settings.SettingsStore
 import com.digihori.marketpanel.data.settings.AssetType
 import com.digihori.marketpanel.data.settings.WatchInstrument
+import com.digihori.marketpanel.data.settings.resolveMainInstrumentDisplayNames
 import com.digihori.marketpanel.rotation.RotationController
 import com.digihori.marketpanel.ui.settings.SettingsActivity
 import kotlinx.coroutines.CoroutineScope
@@ -53,11 +58,34 @@ class DashboardActivity : Activity() {
     private var fundIndex = 0
     private var marketIndex = 0
     private var currentRotationIntervalMillis = 60_000L
+    private var apiUsageDisplay = if (BuildConfig.USE_DEMO_DATA) "API DEMO" else "API -- / 800"
+    private var batteryDisplay = "BAT --%"
+    private var batteryReceiverRegistered = false
     private var configurationJob: Job? = null
     private var refreshJob: Job? = null
     private val stockPanelsById = linkedMapOf<String, DemoMarketData.StockPanels>()
     private val fundPanelsById = linkedMapOf<String, DemoMarketData.MarketPanel>()
     private val marketPanelsById = linkedMapOf<String, DemoMarketData.MarketPanel>()
+    private val marketDisplayNamesById = mutableMapOf<String, String>()
+    private val resolvedStockNamesBySymbol = mutableMapOf<String, String>()
+    private val persistedAutoNameSymbols = mutableSetOf<String>()
+    private val batteryReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != Intent.ACTION_BATTERY_CHANGED) return
+            val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+            val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100)
+            val percent = if (level >= 0 && scale > 0) level * 100 / scale else null
+            val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, BatteryManager.BATTERY_STATUS_UNKNOWN)
+            val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                status == BatteryManager.BATTERY_STATUS_FULL
+            batteryDisplay = buildString {
+                append("BAT ")
+                append(percent?.let { "$it%" } ?: "--%")
+                if (charging) append(" • 充電中")
+            }
+            updateHeader()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -71,6 +99,7 @@ class DashboardActivity : Activity() {
         intradayPanel = findViewById(R.id.intradayPanel)
         marketPanel = findViewById(R.id.marketPanel)
         apiUsageText = findViewById(R.id.apiUsageText)
+        updateHeader()
         rotationProgress = findViewById(R.id.rotationProgress)
         stockIndex = savedInstanceState?.getInt(KEY_STOCK_INDEX) ?: 0
         fundIndex = savedInstanceState?.getInt(KEY_FUND_INDEX) ?: 0
@@ -90,6 +119,8 @@ class DashboardActivity : Activity() {
     override fun onStart() {
         super.onStart()
         started = true
+        registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        batteryReceiverRegistered = true
         configurationJob?.cancel()
         configurationJob = scope.launch {
             configureRotations()
@@ -98,6 +129,10 @@ class DashboardActivity : Activity() {
 
     override fun onStop() {
         started = false
+        if (batteryReceiverRegistered) {
+            unregisterReceiver(batteryReceiver)
+            batteryReceiverRegistered = false
+        }
         configurationJob?.cancel()
         refreshJob?.cancel()
         if (::stockRotation.isInitialized) stockRotation.stop()
@@ -154,11 +189,15 @@ class DashboardActivity : Activity() {
         val markets = enabled.filter { it.assetType == AssetType.MARKET_INDEX }
         val stockIds = stocks.map { it.symbol }
         val marketIds = markets.map { it.symbol }
+        resolvedStockNamesBySymbol.clear()
+        persistedAutoNameSymbols.clear()
+        marketDisplayNamesById.clear()
+        marketDisplayNamesById.putAll(markets.associate { it.symbol to it.displayName })
         stockPanelsById.keys.retainAll(stockIds.toSet())
         fundPanelsById.keys.retainAll(funds.map { it.id }.toSet())
         marketPanelsById.keys.retainAll(marketIds.toSet())
         mainPanel.showStatus("読み込み中…")
-        intradayPanel.showStatus("基準価額 • DEMO")
+        intradayPanel.showStatus("参考値 • DEMO")
         marketPanel.showStatus("読み込み中…")
         coroutineScope {
             listOf(
@@ -168,10 +207,12 @@ class DashboardActivity : Activity() {
             ).awaitAll()
         }
         if (!started) return
+        persistResolvedStockNames(settings)
         restartStockRotation(stockIds.mapNotNull(stockPanelsById::get), settings.rotationIntervalMillis)
         restartFundRotation(funds.mapNotNull { fundPanelsById[it.id] }, settings.rotationIntervalMillis)
         restartMarketRotation(marketIds.mapNotNull(marketPanelsById::get), settings.rotationIntervalMillis)
-        apiUsageText.text = apiUsageRepository.displayText()
+        apiUsageDisplay = apiUsageRepository.displayText()
+        updateHeader()
 
         refreshJob?.cancel()
         refreshJob = scope.launch {
@@ -233,6 +274,7 @@ class DashboardActivity : Activity() {
             loaded += batch.items
             failed += batch.failedCount
             batch.items.firstOrNull()?.let { result ->
+                resolvedStockNamesBySymbol[symbol] = result.value.quote.name
                 stockPanelsById[symbol] = result.value.toPanels()
                 val panels = stockIds.mapNotNull(stockPanelsById::get)
                 applyStocks(panels, intervalMillis)
@@ -263,7 +305,7 @@ class DashboardActivity : Activity() {
             loaded += batch.items
             failed += batch.failedCount
             batch.items.firstOrNull()?.let { result ->
-                marketPanelsById[id] = result.value.toPanelData()
+                marketPanelsById[id] = result.value.toPanelData(marketDisplayNamesById[id])
                 val panels = marketIds.mapNotNull(marketPanelsById::get)
                 applyMarkets(panels, intervalMillis)
             }
@@ -425,7 +467,28 @@ class DashboardActivity : Activity() {
             ).awaitAll()
         }
         if (!started) return
-        apiUsageText.text = apiUsageRepository.displayText()
+        persistResolvedStockNames(settings)
+        apiUsageDisplay = apiUsageRepository.displayText()
+        updateHeader()
+    }
+
+    private fun updateHeader() {
+        if (::apiUsageText.isInitialized) {
+            apiUsageText.text = "$apiUsageDisplay  •  $batteryDisplay"
+        }
+    }
+
+    private suspend fun persistResolvedStockNames(
+        settings: com.digihori.marketpanel.data.settings.MarketPanelSettings,
+    ) {
+        if (BuildConfig.USE_DEMO_DATA) return
+        val pendingNames = resolvedStockNamesBySymbol.filterKeys { it !in persistedAutoNameSymbols }
+        if (pendingNames.isEmpty()) return
+        val updated = resolveMainInstrumentDisplayNames(settings.instruments, resolvedStockNamesBySymbol)
+        persistedAutoNameSymbols += pendingNames.keys
+        if (updated != settings.instruments) {
+            settingsStore.save(settings.copy(instruments = updated))
+        }
     }
 
     private fun showDataStatus(panel: MarketPanelView, text: String, isError: Boolean) {
@@ -460,7 +523,14 @@ class DashboardActivity : Activity() {
         const val KEY_STOCK_INDEX = "stock_index"
         const val KEY_FUND_INDEX = "fund_index"
         const val KEY_MARKET_INDEX = "market_index"
-        val MARKET_INDICATOR_IDS = setOf("NIKKEI225", "SP500", "USDJPY")
+        val MARKET_INDICATOR_IDS = setOf(
+            "NIKKEI225",
+            "SP500",
+            "DOW30",
+            "NASDAQ100",
+            "VIX",
+            "USDJPY",
+        )
         const val DEBUG_ROTATION_INTERVAL_MILLIS = 5_000L
         const val SUB1_PHASE_OFFSET_MILLIS = 10_000L
         const val SUB2_PHASE_OFFSET_MILLIS = 20_000L

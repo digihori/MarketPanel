@@ -7,6 +7,9 @@ import com.digihori.marketpanel.domain.model.StockSnapshot
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.ConcurrentHashMap
 
 class MarketRepository(
     private val provider: StockDataProvider,
@@ -15,6 +18,7 @@ class MarketRepository(
     private val chartLifetimeMillis: Long = 24 * 60 * 60 * 1_000L,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
+    private val requestLocks = ConcurrentHashMap<String, Mutex>()
     suspend fun getStocks(
         symbols: List<String>,
         range: String,
@@ -40,6 +44,14 @@ class MarketRepository(
         symbol: String,
         range: String,
         forceRefresh: Boolean,
+    ): LoadedValue<StockSnapshot>? = requestLocks.getOrPut("stock:$symbol:$range") { Mutex() }.withLock {
+        getStockUnlocked(symbol, range, forceRefresh)
+    }
+
+    private suspend fun getStockUnlocked(
+        symbol: String,
+        range: String,
+        forceRefresh: Boolean,
     ): LoadedValue<StockSnapshot>? {
         val cached = cache.findStock(symbol, range)
         val currentTime = now()
@@ -50,27 +62,45 @@ class MarketRepository(
         if (quoteIsFresh && chartIsFresh) {
             return LoadedValue(cached.value, DataOrigin.CACHE_FRESH)
         }
-        val quote = if (quoteIsFresh) cached?.value?.quote else
-            runCatching { provider.getQuote(symbol) }.getOrNull() ?: cached?.value?.quote
+        val fetchedQuote = if (quoteIsFresh) null else
+            runCatching { provider.getQuote(symbol) }.getOrNull()
+        val fetchedChart = if (chartIsFresh) null else
+            runCatching { provider.getLongTermChart(symbol, range) }.getOrNull()
+        val quote = if (quoteIsFresh) cached?.value?.quote else fetchedQuote ?: cached?.value?.quote
         val chart = if (chartIsFresh) cached?.value?.longTerm.orEmpty() else
-            runCatching { provider.getLongTermChart(symbol, range) }.getOrNull() ?: cached?.value?.longTerm.orEmpty()
+            fetchedChart ?: cached?.value?.longTerm.orEmpty()
         if (quote == null) return null
-        val quoteFetchedAt = if (quoteIsFresh || quote == cached?.value?.quote) {
+        val quoteFetchedAt = if (quoteIsFresh) {
             cached?.fetchedAtEpochMillis ?: currentTime
-        } else currentTime
-        val chartFetchedAt = if (chartIsFresh || chart == cached?.value?.longTerm) {
+        } else if (fetchedQuote != null) {
+            currentTime
+        } else {
+            cached?.fetchedAtEpochMillis ?: currentTime
+        }
+        val chartFetchedAt = if (chartIsFresh) {
             cached?.secondaryFetchedAtEpochMillis ?: 0L
-        } else currentTime
+        } else if (fetchedChart != null) {
+            currentTime
+        } else {
+            cached?.secondaryFetchedAtEpochMillis ?: 0L
+        }
         val snapshot = StockSnapshot(quote, chart, emptyList())
         cache.saveStock(symbol, range, snapshot, quoteFetchedAt, chartFetchedAt)
         val origin = if (quoteIsFresh && chartIsFresh) DataOrigin.CACHE_FRESH
-        else if ((!quoteIsFresh && quote == cached?.value?.quote) || (!chartIsFresh && chart == cached?.value?.longTerm)) {
+        else if ((!quoteIsFresh && fetchedQuote == null) || (!chartIsFresh && fetchedChart == null)) {
             DataOrigin.CACHE_STALE
         } else DataOrigin.NETWORK
         return LoadedValue(snapshot, origin)
     }
 
-    private suspend fun getMarket(id: String, forceRefresh: Boolean): LoadedValue<MarketSnapshot>? {
+    private suspend fun getMarket(
+        id: String,
+        forceRefresh: Boolean,
+    ): LoadedValue<MarketSnapshot>? = requestLocks.getOrPut("market:$id") { Mutex() }.withLock {
+        getMarketUnlocked(id, forceRefresh)
+    }
+
+    private suspend fun getMarketUnlocked(id: String, forceRefresh: Boolean): LoadedValue<MarketSnapshot>? {
         val cached = cache.findMarket(id)
         if (cached != null && now() - cached.fetchedAtEpochMillis < quoteLifetimeMillis) {
             return LoadedValue(cached.value, DataOrigin.CACHE_FRESH)

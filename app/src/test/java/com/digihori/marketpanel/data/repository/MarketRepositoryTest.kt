@@ -54,6 +54,19 @@ class MarketRepositoryTest {
     }
 
     @Test
+    fun successfulUnchangedQuoteAdvancesCacheTimestamp() = runTest {
+        val cache = FakeCache(stock = CachedValue(stock, 1L, 9_000_000L))
+        val provider = FakeProvider(stock)
+        val repository = MarketRepository(provider, cache, now = { 10_000_000L })
+
+        repository.getStocks(listOf("7203"), "1y")
+
+        assertEquals(10_000_000L, cache.savedAt)
+        assertEquals(9_000_000L, cache.savedChartAt)
+        assertEquals(1, provider.stockCalls)
+    }
+
+    @Test
     fun totalFailureReturnsAnErrorBatch() = runTest {
         val repository = MarketRepository(FakeProvider(stock, fail = true), FakeCache(), now = { 1L })
 
@@ -86,6 +99,8 @@ class MarketRepositoryTest {
         private val stock: CachedValue<StockSnapshot>? = null,
     ) : MarketCacheDataSource {
         var savedStock: StockSnapshot? = null
+        var savedAt: Long? = null
+        var savedChartAt: Long? = null
 
         override suspend fun findStock(symbol: String, range: String) = stock
         override suspend fun saveStock(
@@ -96,6 +111,8 @@ class MarketRepositoryTest {
             chartFetchedAt: Long,
         ) {
             savedStock = value
+            savedAt = now
+            savedChartAt = chartFetchedAt
         }
 
         override suspend fun findMarket(id: String): CachedValue<MarketSnapshot>? = null

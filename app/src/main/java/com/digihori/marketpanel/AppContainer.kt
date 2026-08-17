@@ -29,7 +29,7 @@ class AppContainer(context: Context) {
     private val cache = MarketCache(database.marketCacheDao(), json)
     private val apiCreditPacer = ApiCreditPacer()
     val apiCreditLog = ApiCreditLog(context)
-    private val apiRetryPolicy = ApiRetryPolicy(context, apiCreditLog)
+    val apiRetryPolicy = ApiRetryPolicy(context, apiCreditLog)
     private val api: MarketPanelApi by lazy {
         Retrofit.Builder()
             .baseUrl(BuildConfig.MARKET_API_BASE_URL)

@@ -65,6 +65,56 @@ test("maps an ascending chart response", async () => {
   assert.deepEqual(body.points.map((point) => point.value), [178.1, 182.48]);
 });
 
+test("uses free-plan ETF proxies for market indices", async () => {
+  const requestedUrls = [];
+  const responses = [
+    { symbol: "VOO", name: "Vanguard S&P 500 ETF", close: "600", change: "2", percent_change: "0.3" },
+    { values: [{ datetime: "2026-08-15 00:00:00", close: "600" }] },
+  ];
+  const response = await handleRequest(
+    new Request("https://api.example/v1/markets/SP500"),
+    env,
+    memoryCache(),
+    async (url) => {
+      requestedUrls.push(url);
+      return upstream(responses.shift());
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(requestedUrls.length, 2);
+  assert.ok(requestedUrls.every((url) => url.includes("symbol=VOO")));
+  assert.equal((await response.json()).id, "SP500");
+});
+
+test("maps added market indicators to free-plan proxies", async () => {
+  const cases = [
+    ["DOW30", "DIA"],
+    ["NASDAQ100", "QQQ"],
+    ["VIX", "VIXY"],
+  ];
+  for (const [id, proxy] of cases) {
+    const requestedUrls = [];
+    const responses = [
+      { symbol: proxy, name: proxy, close: "100", change: "1", percent_change: "1" },
+      { values: [{ datetime: "2026-08-15 00:00:00", close: "100" }] },
+    ];
+    const response = await handleRequest(
+      new Request(`https://api.example/v1/markets/${id}`),
+      env,
+      memoryCache(),
+      async (url) => {
+        requestedUrls.push(url);
+        return upstream(responses.shift());
+      },
+    );
+
+    assert.equal(response.status, 200);
+    assert.ok(requestedUrls.every((url) => url.includes(`symbol=${proxy}`)));
+    assert.equal((await response.json()).id, id);
+  }
+});
+
 test("returns a normalized error when upstream rejects a request", async () => {
   const response = await handleRequest(
     new Request("https://api.example/v1/quotes/UNKNOWN"),

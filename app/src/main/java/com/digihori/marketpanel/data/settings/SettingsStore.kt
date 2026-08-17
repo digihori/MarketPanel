@@ -27,7 +27,7 @@ class SettingsStore(private val context: Context) {
                 DefaultWatchInstruments.items
             } else if ((preferences[INSTRUMENTS_VERSION] ?: 0) < CURRENT_INSTRUMENTS_VERSION) {
                 val withAddedDefaults = decodedInstruments + DefaultWatchInstruments.items.filter { default ->
-                    default.id in VERSION_2_ADDED_IDS && decodedInstruments.none { it.id == default.id }
+                    default.id in MIGRATION_ADDED_IDS && decodedInstruments.none { it.id == default.id }
                 }
                 withAddedDefaults.map { item ->
                     if (item.id == "stock_spcx" && item.dataSource == InstrumentDataSource.DEMO) {
@@ -86,7 +86,13 @@ class SettingsStore(private val context: Context) {
         val FULLSCREEN = booleanPreferencesKey("fullscreen")
         val INSTRUMENTS = stringPreferencesKey("watch_instruments")
         val INSTRUMENTS_VERSION = intPreferencesKey("watch_instruments_version")
-        const val CURRENT_INSTRUMENTS_VERSION = 3
-        val VERSION_2_ADDED_IDS = setOf("ref_nikkei_hd", "ref_sp500")
+        const val CURRENT_INSTRUMENTS_VERSION = 4
+        val MIGRATION_ADDED_IDS = setOf(
+            "ref_nikkei_hd",
+            "ref_sp500",
+            "market_dow30",
+            "market_nasdaq100",
+            "market_vix",
+        )
     }
 }

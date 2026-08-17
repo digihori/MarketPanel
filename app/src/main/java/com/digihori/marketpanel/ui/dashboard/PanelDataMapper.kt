@@ -29,7 +29,7 @@ fun StockSnapshot.toPanels() = DemoMarketData.StockPanels(
     ),
 )
 
-fun MarketSnapshot.toPanelData() = DemoMarketData.MarketPanel(
+fun MarketSnapshot.toPanelData(displayName: String? = null) = DemoMarketData.MarketPanel(
     id = id,
     panel = quote.toPanel(
         label = "SUB2  •  MARKET",
@@ -37,14 +37,15 @@ fun MarketSnapshot.toPanelData() = DemoMarketData.MarketPanel(
         points = series.map { it.value.toFloat() },
         xAxisLabels = series.map { POINT_DATE_FORMAT.format(Date(it.timestampEpochSeconds * 1_000)) },
         includeAbsoluteChange = true,
+        title = displayName?.let { "${quote.symbol}  $it" } ?: "${quote.symbol}  ${quote.name}",
     ),
 )
 
 fun StockSnapshot.toFundPanel(instrument: WatchInstrument) = DemoMarketData.MarketPanel(
     id = instrument.id,
     panel = quote.toPanel(
-        label = "SUB1  •  FUND REFERENCE",
-        subtitle = "${instrument.displayName} • ${quote.exchange}",
+        label = "SUB1  •  参照ETFの値動き（実基準価額ではありません）",
+        subtitle = "${instrument.displayName} • ${quote.exchange} • ${quote.currency}建て",
         points = longTerm.map { it.value.toFloat() },
         xAxisLabels = longTerm.map { POINT_DATE_FORMAT.format(Date(it.timestampEpochSeconds * 1_000)) },
         includeAbsoluteChange = true,
@@ -55,8 +56,8 @@ fun StockSnapshot.toFundPanel(instrument: WatchInstrument) = DemoMarketData.Mark
 fun MarketSnapshot.toFundPanel(instrument: WatchInstrument) = DemoMarketData.MarketPanel(
     id = instrument.id,
     panel = quote.toPanel(
-        label = "SUB1  •  FUND REFERENCE",
-        subtitle = "${instrument.displayName} • ${quote.exchange}",
+        label = "SUB1  •  参考市場の値動き（実基準価額ではありません）",
+        subtitle = "${instrument.displayName} • ${quote.exchange} • ${quote.currency}建て",
         points = series.map { it.value.toFloat() },
         xAxisLabels = series.map { POINT_DATE_FORMAT.format(Date(it.timestampEpochSeconds * 1_000)) },
         includeAbsoluteChange = true,

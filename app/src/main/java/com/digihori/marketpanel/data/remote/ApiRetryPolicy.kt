@@ -38,6 +38,11 @@ class ApiRetryPolicy(
         preferences.edit().putString(key, "$failures|$blockedUntil").apply()
     }
 
+    @Synchronized
+    fun clearAll() {
+        preferences.edit().clear().apply()
+    }
+
     private fun read(key: String): FailureState {
         val parts = preferences.getString(key, null)?.split('|').orEmpty()
         return FailureState(

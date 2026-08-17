@@ -15,6 +15,6 @@ data class MarketPanelSettings(
     companion object {
         val DEFAULT_STOCKS = setOf("IBM", "MCD", "SPCX", "JEPQ", "QQQI", "563A")
         val DEFAULT_FUNDS = setOf("EMAXIS_ALL_COUNTRY", "IFREE_FANG_PLUS", "SBI_S_SCHD_4X")
-        val DEFAULT_MARKETS = setOf("NIKKEI225", "SP500", "USDJPY")
+        val DEFAULT_MARKETS = setOf("NIKKEI225", "SP500", "DOW30", "NASDAQ100", "VIX", "USDJPY")
     }
 }
