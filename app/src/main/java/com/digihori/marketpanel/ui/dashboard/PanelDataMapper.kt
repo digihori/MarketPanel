@@ -14,7 +14,7 @@ import java.util.Locale
 fun StockSnapshot.toPanels() = DemoMarketData.StockPanels(
     id = quote.symbol,
     main = quote.toPanel(
-        label = "MAIN  •  WATCHLIST",
+        label = "MAIN1  •  米国株／米国ETF",
         subtitle = quote.exchange,
         points = longTerm.map { it.value.toFloat() },
         xAxisLabels = longTerm.map { POINT_DATE_FORMAT.format(Date(it.timestampEpochSeconds * 1_000)) },
@@ -26,6 +26,25 @@ fun StockSnapshot.toPanels() = DemoMarketData.StockPanels(
         points = emptyList(),
         xAxisLabels = emptyList(),
         includeAbsoluteChange = false,
+    ),
+)
+
+fun MarketSnapshot.toJapanStockPanels(displayName: String) = DemoMarketData.StockPanels(
+    id = id,
+    main = quote.toPanel(
+        label = "MAIN2  •  日本株／国内ETF",
+        subtitle = quote.exchange,
+        points = series.map { it.value.toFloat() },
+        xAxisLabels = series.map { POINT_DATE_FORMAT.format(Date(it.timestampEpochSeconds * 1_000)) },
+        includeAbsoluteChange = true,
+        title = "${quote.symbol}  ${if (displayName == quote.symbol) quote.name else displayName}",
+    ),
+    intraday = quote.toPanel(
+        label = "MAIN2  •  日本株／国内ETF",
+        subtitle = quote.exchange,
+        points = emptyList(),
+        xAxisLabels = emptyList(),
+        includeAbsoluteChange = true,
     ),
 )
 
@@ -65,6 +84,20 @@ fun MarketSnapshot.toFundPanel(instrument: WatchInstrument) = DemoMarketData.Mar
     ),
 )
 
+fun MarketSnapshot.toActualFundPanel(instrument: WatchInstrument) = DemoMarketData.MarketPanel(
+    id = instrument.id,
+    panel = quote.toPanel(
+        label = "SUB1  •  国内投信の実基準価額",
+        subtitle = "過去1年・週次 • 1万口あたり",
+        points = series.map { it.value.toFloat() },
+        xAxisLabels = series.map { POINT_DATE_FORMAT.format(Date(it.timestampEpochSeconds * 1_000)) },
+        includeAbsoluteChange = true,
+        title = instrument.displayName,
+    ).copy(
+        updatedAt = "基準日 ${FUND_DATE_FORMAT.format(Date(quote.updatedAtEpochSeconds * 1_000))}",
+    ),
+)
+
 private fun Quote.toPanel(
     label: String,
     subtitle: String,
@@ -97,6 +130,7 @@ private fun Quote.toPanel(
 private fun formatPrice(value: Double, currency: String): String = when (currency) {
     "JPY" -> "${NumberFormat.getNumberInstance(Locale.JAPAN).format(value)}円"
     "USD" -> "\$${NumberFormat.getNumberInstance(Locale.US).format(value)}"
+    "PCT" -> "${NumberFormat.getNumberInstance(Locale.US).apply { maximumFractionDigits = 2 }.format(value)}%"
     else -> "${NumberFormat.getNumberInstance().format(value)} $currency"
 }
 
@@ -105,3 +139,4 @@ private fun formatNumber(value: Double): String =
 
 private val TIME_FORMAT = SimpleDateFormat("HH:mm", Locale.JAPAN)
 private val POINT_DATE_FORMAT = SimpleDateFormat("yy/MM", Locale.JAPAN)
+private val FUND_DATE_FORMAT = SimpleDateFormat("yyyy/MM/dd", Locale.JAPAN)

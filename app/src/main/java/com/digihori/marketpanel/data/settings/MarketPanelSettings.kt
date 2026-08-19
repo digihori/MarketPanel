@@ -10,6 +10,9 @@ data class MarketPanelSettings(
     val autoStart: Boolean = false,
     val keepScreenOn: Boolean = true,
     val fullscreen: Boolean = true,
+    val nightModeEnabled: Boolean = false,
+    val nightStartMinutes: Int = 23 * 60,
+    val nightEndMinutes: Int = 6 * 60,
     val instruments: List<WatchInstrument> = DefaultWatchInstruments.items,
 ) {
     companion object {

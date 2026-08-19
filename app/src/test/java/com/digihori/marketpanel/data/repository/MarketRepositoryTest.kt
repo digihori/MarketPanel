@@ -28,7 +28,7 @@ class MarketRepositoryTest {
     }
 
     @Test
-    fun forceRefreshDoesNotBypassTwoHourQuoteCache() = runTest {
+    fun forceRefreshDoesNotBypassFourHourQuoteCache() = runTest {
         val oldStock = stock("7203", 3_000.0)
         val cache = FakeCache(stock = CachedValue(oldStock, 900_000L))
         val provider = FakeProvider(stock)
@@ -45,7 +45,7 @@ class MarketRepositoryTest {
     fun providerFailureFallsBackToStaleCache() = runTest {
         val cache = FakeCache(stock = CachedValue(stock, 1L))
         val provider = FakeProvider(stock, fail = true)
-        val repository = MarketRepository(provider, cache, now = { 10_000_000L })
+        val repository = MarketRepository(provider, cache, now = { 20_000_000L })
 
         val result = repository.getStocks(listOf("7203"), "1y")
 
@@ -57,11 +57,11 @@ class MarketRepositoryTest {
     fun successfulUnchangedQuoteAdvancesCacheTimestamp() = runTest {
         val cache = FakeCache(stock = CachedValue(stock, 1L, 9_000_000L))
         val provider = FakeProvider(stock)
-        val repository = MarketRepository(provider, cache, now = { 10_000_000L })
+        val repository = MarketRepository(provider, cache, now = { 20_000_000L })
 
         repository.getStocks(listOf("7203"), "1y")
 
-        assertEquals(10_000_000L, cache.savedAt)
+        assertEquals(20_000_000L, cache.savedAt)
         assertEquals(9_000_000L, cache.savedChartAt)
         assertEquals(1, provider.stockCalls)
     }
@@ -93,6 +93,8 @@ class MarketRepositoryTest {
             stock.longTerm
 
         override suspend fun getMarketIndicator(id: String): MarketSnapshot = error("not used")
+        override suspend fun getFund(id: String): MarketSnapshot = error("not used")
+        override suspend fun getJapanStock(symbol: String): MarketSnapshot = error("not used")
     }
 
     private class FakeCache(

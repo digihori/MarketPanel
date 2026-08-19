@@ -30,9 +30,21 @@ class SettingsStore(private val context: Context) {
                     default.id in MIGRATION_ADDED_IDS && decodedInstruments.none { it.id == default.id }
                 }
                 withAddedDefaults.map { item ->
-                    if (item.id == "stock_spcx" && item.dataSource == InstrumentDataSource.DEMO) {
-                        item.copy(dataSource = InstrumentDataSource.TWELVE_DATA)
-                    } else item
+                    when {
+                        item.id == "stock_spcx" && item.dataSource == InstrumentDataSource.DEMO ->
+                            item.copy(dataSource = InstrumentDataSource.TWELVE_DATA)
+                        item.id == "market_vix" && item.displayName.contains("VIXY") ->
+                            item.copy(displayName = "VIX指数")
+                        item.id in FUND_MIGRATIONS -> {
+                            val replacement = FUND_MIGRATIONS.getValue(item.id)
+                            item.copy(
+                                displayName = replacement.displayName,
+                                symbol = replacement.symbol,
+                                dataSource = replacement.dataSource,
+                            )
+                        }
+                        else -> item
+                    }
                 }
             } else {
                 decodedInstruments
@@ -47,9 +59,13 @@ class SettingsStore(private val context: Context) {
                 autoStart = preferences[AUTO_START] ?: false,
                 keepScreenOn = preferences[KEEP_SCREEN_ON] ?: true,
                 fullscreen = preferences[FULLSCREEN] ?: true,
+                nightModeEnabled = preferences[NIGHT_MODE_ENABLED] ?: false,
+                nightStartMinutes = preferences[NIGHT_START_MINUTES] ?: 23 * 60,
+                nightEndMinutes = preferences[NIGHT_END_MINUTES] ?: 6 * 60,
                 instruments = migratedInstruments.map { item ->
                     when (item.assetType) {
                         AssetType.US_STOCK, AssetType.US_ETF -> if (decodedInstruments == null) item.copy(enabled = item.symbol in legacyStocks) else item
+                        AssetType.JAPAN_STOCK, AssetType.JAPAN_ETF -> item
                         AssetType.MARKET_INDEX -> if (decodedInstruments == null) item.copy(enabled = item.symbol in legacyMarkets) else item
                         AssetType.FUND_REFERENCE -> item
                     }
@@ -69,6 +85,9 @@ class SettingsStore(private val context: Context) {
             preferences[AUTO_START] = settings.autoStart
             preferences[KEEP_SCREEN_ON] = settings.keepScreenOn
             preferences[FULLSCREEN] = settings.fullscreen
+            preferences[NIGHT_MODE_ENABLED] = settings.nightModeEnabled
+            preferences[NIGHT_START_MINUTES] = settings.nightStartMinutes
+            preferences[NIGHT_END_MINUTES] = settings.nightEndMinutes
             preferences[INSTRUMENTS] = json.encodeToString(settings.instruments)
             preferences[INSTRUMENTS_VERSION] = CURRENT_INSTRUMENTS_VERSION
         }
@@ -84,9 +103,15 @@ class SettingsStore(private val context: Context) {
         val AUTO_START = booleanPreferencesKey("auto_start")
         val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
         val FULLSCREEN = booleanPreferencesKey("fullscreen")
+        val NIGHT_MODE_ENABLED = booleanPreferencesKey("night_mode_enabled")
+        val NIGHT_START_MINUTES = intPreferencesKey("night_start_minutes")
+        val NIGHT_END_MINUTES = intPreferencesKey("night_end_minutes")
         val INSTRUMENTS = stringPreferencesKey("watch_instruments")
         val INSTRUMENTS_VERSION = intPreferencesKey("watch_instruments_version")
-        const val CURRENT_INSTRUMENTS_VERSION = 4
+        const val CURRENT_INSTRUMENTS_VERSION = 6
+        val FUND_MIGRATIONS = DefaultWatchInstruments.items
+            .filter { it.assetType == AssetType.FUND_REFERENCE }
+            .associateBy { it.id }
         val MIGRATION_ADDED_IDS = setOf(
             "ref_nikkei_hd",
             "ref_sp500",

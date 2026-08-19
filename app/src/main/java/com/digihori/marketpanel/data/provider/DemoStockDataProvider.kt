@@ -22,6 +22,23 @@ class DemoStockDataProvider : StockDataProvider {
         )
     }
 
+    override suspend fun getFund(id: String): MarketSnapshot {
+        val fund = DemoMarketData.funds.first { it.id == id }
+        return MarketSnapshot(
+            id = id,
+            quote = fund.panel.toQuote(id),
+            series = fund.panel.points.toPricePoints(),
+        )
+    }
+
+    override suspend fun getJapanStock(symbol: String): MarketSnapshot = MarketSnapshot(
+        id = symbol,
+        quote = Quote(symbol, "日本株デモ", "東京証券取引所", "JPY", 3245.0, 42.0, 1.31, System.currentTimeMillis() / 1_000),
+        series = listOf(3000.0, 3050.0, 3020.0, 3100.0, 3150.0, 3200.0, 3245.0).mapIndexed { index, value ->
+            PricePoint(index.toLong(), value)
+        },
+    )
+
     private fun com.digihori.marketpanel.domain.model.PanelData.toQuote(symbol: String) = Quote(
         symbol = symbol,
         name = title.substringAfter("  ", title),

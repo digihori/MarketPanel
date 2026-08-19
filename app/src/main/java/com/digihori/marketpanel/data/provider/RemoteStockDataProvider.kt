@@ -40,6 +40,22 @@ class RemoteStockDataProvider(
         )
     }
 
+    override suspend fun getFund(id: String): MarketSnapshot {
+        val response = withRetryPolicy("fund:$id", "/v1/funds/$id", credits = 0) { api.getFund(id) }
+        return MarketSnapshot(
+            id = response.id,
+            quote = response.quote.toDomain(),
+            series = response.points.map { it.toDomain() },
+        )
+    }
+
+    override suspend fun getJapanStock(symbol: String): MarketSnapshot {
+        val response = withRetryPolicy("jp-stock:$symbol", "/v1/jp-stocks/$symbol", credits = 0) {
+            api.getJapanStock(symbol)
+        }
+        return MarketSnapshot(response.id, response.quote.toDomain(), response.points.map { it.toDomain() })
+    }
+
     private suspend fun <T> withRetryPolicy(
         key: String,
         path: String,
@@ -49,7 +65,7 @@ class RemoteStockDataProvider(
         retryPolicy.requireAllowed(key, path)
         var retried = false
         while (true) {
-            creditPacer.acquire(credits)
+            if (credits > 0) creditPacer.acquire(credits)
             try {
                 return request().also { retryPolicy.recordSuccess(key) }
             } catch (error: Throwable) {

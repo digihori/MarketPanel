@@ -8,4 +8,6 @@ interface StockDataProvider {
     suspend fun getQuote(symbol: String): Quote
     suspend fun getLongTermChart(symbol: String, range: String): List<PricePoint>
     suspend fun getMarketIndicator(id: String): MarketSnapshot
+    suspend fun getFund(id: String): MarketSnapshot
+    suspend fun getJapanStock(symbol: String): MarketSnapshot
 }

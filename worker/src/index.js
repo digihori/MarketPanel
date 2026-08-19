@@ -5,7 +5,6 @@ const MARKET_SYMBOLS = {
   SP500: "VOO",
   DOW30: "DIA",
   NASDAQ100: "QQQ",
-  VIX: "VIXY",
   USDJPY: "USD/JPY",
 };
 
@@ -14,8 +13,18 @@ const MARKET_NAMES = {
   SP500: "S&P 500参考（VOO）",
   DOW30: "NYダウ参考（DIA）",
   NASDAQ100: "NASDAQ-100参考（QQQ）",
-  VIX: "VIX短期先物参考（VIXY）",
+  VIX: "VIX指数",
   USDJPY: "米ドル／円",
+};
+
+const VIX_LAST_GOOD_KEY = "marketpanel:last-good:vix";
+
+const FUND_DEFINITIONS = {
+  EMAXIS_ALL_COUNTRY: { code: "0331418A", name: "eMAXIS Slim 全世界株式（オール・カントリー）" },
+  EMAXIS_SP500: { code: "03311187", name: "eMAXIS Slim 米国株式（S&P500）" },
+  IFREE_FANG_PLUS: { code: "04311181", name: "iFreeNEXT FANG+インデックス" },
+  SBI_S_SCHD_4X: { code: "8931224C", name: "SBI・S・米国高配当株式ファンド（年4回決算型）" },
+  TRACERS_NIKKEI_HD50: { code: "02313241", name: "Tracers 日経平均高配当株50インデックス（奇数月分配型）" },
 };
 
 export default {
@@ -28,13 +37,23 @@ export async function handleRequest(request, env, cache, fetchImpl, context = nu
   if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
   if (!env.TWELVE_DATA_API_KEY) return json({ error: "server_not_configured" }, 503);
 
-  const cached = await cache.match(request);
+  const url = new URL(request.url);
+  const parts = url.pathname.split("/").filter(Boolean);
+  const historyCacheVersion = parts[0] === "v1" && parts[1] === "markets"
+    ? "history-v4"
+    : parts[0] === "v1" && parts[1] === "jp-stocks"
+      ? "history-v4"
+      : parts[0] === "v1" && parts[1] === "funds"
+      ? "history-v2"
+      : "";
+  const cacheUrl = new URL(request.url);
+  if (historyCacheVersion) cacheUrl.searchParams.set("__marketpanel_cache", historyCacheVersion);
+  const cacheRequest = new Request(cacheUrl.toString(), request);
+  const cached = await cache.match(cacheRequest);
   if (cached) return withCacheHeader(cached, "HIT");
 
   try {
-    const url = new URL(request.url);
-    const parts = url.pathname.split("/").filter(Boolean);
-    const kvKey = `marketpanel:${url.pathname}${url.search}`;
+    const kvKey = `marketpanel:${historyCacheVersion}:${url.pathname}${url.search}`;
     const kvCached = await readKvResponse(env.MARKET_CACHE, kvKey);
     if (kvCached) return withCacheHeader(kvCached, "KV");
     let response;
@@ -48,11 +67,15 @@ export async function handleRequest(request, env, cache, fetchImpl, context = nu
       response = await chartResponse(decodeURIComponent(parts[2]), url.searchParams, env, fetchImpl);
     } else if (parts[1] === "markets" && parts[2]) {
       response = await marketResponse(decodeURIComponent(parts[2]), env, fetchImpl);
+    } else if (parts[1] === "funds" && parts[2]) {
+      response = await fundResponse(decodeURIComponent(parts[2]), env, fetchImpl);
+    } else if (parts[1] === "jp-stocks" && parts[2]) {
+      response = await japanStockResponse(decodeURIComponent(parts[2]), env, fetchImpl);
     } else {
       return json({ error: "not_found" }, 404);
     }
 
-    const writes = [cache.put(request, response.clone())];
+    const writes = [cache.put(cacheRequest, response.clone())];
     if (response.ok && env.MARKET_CACHE) {
       writes.push(writeKvResponse(env.MARKET_CACHE, kvKey, response.clone(), kvTtl(parts)));
     }
@@ -71,7 +94,8 @@ export async function handleRequest(request, env, cache, fetchImpl, context = nu
 
 function kvTtl(parts) {
   if (parts[1] === "charts") return 24 * 60 * 60;
-  if (parts[1] === "quotes" || parts[1] === "markets") return 2 * 60 * 60;
+  if (parts[1] === "funds") return 24 * 60 * 60;
+  if (parts[1] === "quotes" || parts[1] === "markets" || parts[1] === "jp-stocks") return 4 * 60 * 60;
   if (parts[1] === "usage") return 60 * 60;
   return 5 * 60;
 }
@@ -135,11 +159,19 @@ async function chartResponse(symbol, params, env, fetchImpl) {
 }
 
 async function marketResponse(id, env, fetchImpl) {
+  if (id === "VIX") return vixMarketResponse(env, fetchImpl);
+  if (id === "NIKKEI225") {
+    try {
+      return await yahooIndexResponse("NIKKEI225", "%5EN225", "日経平均株価", "JPY", fetchImpl);
+    } catch {
+      // Fall back to the free-plan EWJ proxy below when Yahoo is unavailable.
+    }
+  }
   const symbol = MARKET_SYMBOLS[id];
   if (!symbol) return json({ error: "unknown_market" }, 404);
   const [quote, series] = await Promise.all([
     upstreamJson("quote", { symbol }, env, fetchImpl),
-    upstreamJson("time_series", { symbol, interval: "1day", outputsize: "60", order: "ASC" }, env, fetchImpl),
+    upstreamJson("time_series", { symbol, interval: "1week", outputsize: "52", order: "ASC" }, env, fetchImpl),
   ]);
   const mappedQuote = mapQuote(quote, id);
   mappedQuote.name = MARKET_NAMES[id] || mappedQuote.name;
@@ -151,6 +183,275 @@ async function marketResponse(id, env, fetchImpl) {
     },
     env,
   );
+}
+
+async function fundResponse(id, env, fetchImpl) {
+  const definition = FUND_DEFINITIONS[id] || (/^[0-9A-Z]{8}$/.test(id) ? { code: id, name: id } : null);
+  if (!definition) return json({ error: "unknown_fund" }, 404);
+  const lastGoodKey = `marketpanel:last-good:fund:${id}`;
+  try {
+    const baseUrl = `https://finance.yahoo.co.jp/quote/${encodeURIComponent(definition.code)}/history`;
+    const { from, to } = oneYearDateRange();
+    const urls = [
+      baseUrl,
+      ...[1, 2, 3].map((page) => `${baseUrl}?from=${from}&to=${to}&timeFrame=w&page=${page}`),
+    ];
+    const histories = await Promise.all(urls.map(async (url) => {
+      const upstream = await fetchImpl(url, {
+        headers: {
+          Accept: "text/html",
+          "Accept-Language": "ja-JP,ja;q=0.9",
+          "User-Agent": "Mozilla/5.0 MarketPanel/1.0",
+        },
+      });
+      if (!upstream.ok) throw new UpstreamError(`Fund page returned HTTP ${upstream.status}`, 502);
+      return parseYahooFundHistory(await upstream.text());
+    }));
+    const latest = histories[0][0];
+    const weeklyItems = [...new Map(histories.slice(1).flat()
+      .map((item) => [item.timestamp, item])).values()]
+      .sort((a, b) => a.timestamp - b.timestamp);
+    if (!latest || weeklyItems.length < 2) throw new UpstreamError("Fund page returned insufficient history", 502);
+    const previousPrice = latest.price - latest.change;
+    const response = json({
+      id,
+      quote: {
+        symbol: definition.code,
+        name: definition.name,
+        exchange: "Yahoo!ファイナンス",
+        currency: "JPY",
+        price: latest.price,
+        change: latest.change,
+        changePercent: previousPrice === 0 ? 0 : latest.change / previousPrice * 100,
+        updatedAt: latest.timestamp,
+      },
+      points: weeklyItems.map(({ timestamp, price }) => ({ timestamp, value: price })),
+    }, 200, 300);
+    if (env.MARKET_CACHE) await writeKvResponse(env.MARKET_CACHE, lastGoodKey, response.clone(), 30 * 24 * 60 * 60);
+    return response;
+  } catch (error) {
+    const stale = await readKvResponse(env.MARKET_CACHE, lastGoodKey);
+    if (stale) return stale;
+    throw error;
+  }
+}
+
+function oneYearDateRange(now = new Date()) {
+  const to = new Date(now);
+  const from = new Date(now);
+  from.setUTCFullYear(from.getUTCFullYear() - 1);
+  const format = (value) => `${value.getUTCFullYear()}${String(value.getUTCMonth() + 1).padStart(2, "0")}${String(value.getUTCDate()).padStart(2, "0")}`;
+  return { from: format(from), to: format(to) };
+}
+
+function parseYahooFundHistory(html) {
+  const match = html.match(/historyTable\\":\{\\"items\\":(\[.*?\]),\\"hasNext/);
+  if (!match) throw new UpstreamError("Fund history data was not found", 502);
+  let rows;
+  try {
+    rows = JSON.parse(match[1].replaceAll('\\"', '"'));
+  } catch {
+    throw new UpstreamError("Fund history data could not be parsed", 502);
+  }
+  return rows.flatMap((row) => {
+    const [year, month, day] = String(row.date).split("/").map(Number);
+    const timestamp = Math.floor(Date.UTC(year, month - 1, day) / 1000);
+    const price = Number(String(row.price).replaceAll(",", ""));
+    const change = Number(String(row.priceChange).replaceAll(",", ""));
+    return Number.isFinite(timestamp) && Number.isFinite(price) && Number.isFinite(change) && price > 0
+      ? [{ timestamp, price, change }]
+      : [];
+  });
+}
+
+async function japanStockResponse(requestedSymbol, env, fetchImpl) {
+  const normalized = requestedSymbol.toUpperCase().endsWith(".T")
+    ? requestedSymbol.toUpperCase()
+    : `${requestedSymbol.toUpperCase()}.T`;
+  if (!/^[0-9A-Z]{4,6}\.T$/.test(normalized)) return json({ error: "invalid_japan_symbol" }, 400);
+  const lastGoodKey = `marketpanel:last-good:jp-stock:${normalized}`;
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(normalized)}?range=1y&interval=1d&events=history`;
+    const upstream = await fetchImpl(url, { headers: { Accept: "application/json", "User-Agent": "MarketPanel/1.0" } });
+    const body = await upstream.json();
+    const result = body?.chart?.result?.[0];
+    if (!upstream.ok || !result || body?.chart?.error) {
+      throw new UpstreamError(body?.chart?.error?.description || `Yahoo returned HTTP ${upstream.status}`, 502);
+    }
+    const meta = result.meta || {};
+    const timestamps = result.timestamp || [];
+    const closes = result.indicators?.quote?.[0]?.close || [];
+    const points = timestamps.flatMap((timestamp, index) => {
+      const value = Number(closes[index]);
+      return Number.isFinite(value) && value > 0 ? [{ timestamp: Number(timestamp), value }] : [];
+    });
+    if (points.length < 2) throw new UpstreamError("Yahoo returned insufficient Japan stock history", 502);
+    const price = number(meta.regularMarketPrice ?? points.at(-1).value);
+    const previous = points.at(-2).value;
+    const change = price - previous;
+    const response = json({
+      id: normalized,
+      quote: {
+        symbol: normalized.replace(/\.T$/, ""),
+        name: meta.longName || meta.shortName || normalized,
+        exchange: meta.fullExchangeName || "東京証券取引所",
+        currency: meta.currency || "JPY",
+        price,
+        change,
+        changePercent: previous === 0 ? 0 : change / previous * 100,
+        updatedAt: Number(meta.regularMarketTime) || points.at(-1).timestamp,
+      },
+      points: weeklyLastPoints(points),
+    }, 200, 300);
+    if (env.MARKET_CACHE) await writeKvResponse(env.MARKET_CACHE, lastGoodKey, response.clone(), 30 * 24 * 60 * 60);
+    return response;
+  } catch (error) {
+    const stale = await readKvResponse(env.MARKET_CACHE, lastGoodKey);
+    if (stale) return stale;
+    throw error;
+  }
+}
+
+async function vixMarketResponse(env, fetchImpl) {
+  const failures = [];
+  try {
+    const response = await yahooVixResponse(fetchImpl);
+    await storeLastGoodVix(env.MARKET_CACHE, response.clone());
+    return response;
+  } catch (error) {
+    failures.push(error);
+  }
+  try {
+    const response = await cboeVixResponse(fetchImpl);
+    await storeLastGoodVix(env.MARKET_CACHE, response.clone());
+    return response;
+  } catch (error) {
+    failures.push(error);
+  }
+  const stale = await readKvResponse(env.MARKET_CACHE, VIX_LAST_GOOD_KEY);
+  if (stale) return stale;
+  const messages = failures.map((error) => error instanceof Error ? error.message : String(error));
+  throw new UpstreamError(`VIX providers failed: ${messages.join("; ")}`, 502);
+}
+
+async function yahooVixResponse(fetchImpl) {
+  const url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?range=1y&interval=1d&events=history";
+  const response = await fetchImpl(url, { headers: { Accept: "application/json", "User-Agent": "MarketPanel/1.0" } });
+  const body = await response.json();
+  const result = body?.chart?.result?.[0];
+  if (!response.ok || !result || body?.chart?.error) {
+    throw new UpstreamError(body?.chart?.error?.description || `Yahoo returned HTTP ${response.status}`, 502);
+  }
+  const meta = result.meta || {};
+  const timestamps = result.timestamp || [];
+  const closes = result.indicators?.quote?.[0]?.close || [];
+  const points = timestamps.flatMap((timestamp, index) => {
+    const value = Number(closes[index]);
+    return Number.isFinite(value) && value > 0 ? [{ timestamp: Number(timestamp), value }] : [];
+  });
+  if (points.length < 2) throw new UpstreamError("Yahoo returned insufficient VIX history", 502);
+  const price = number(meta.regularMarketPrice ?? points.at(-1).value);
+  const previous = points.at(-2).value;
+  const change = price - previous;
+  return json({
+    id: "VIX",
+    quote: {
+      symbol: "VIX",
+      name: "VIX指数 • 遅延値",
+      exchange: meta.fullExchangeName || meta.exchangeName || "Cboe",
+      currency: "PCT",
+      price,
+      change,
+      changePercent: previous === 0 ? 0 : change / previous * 100,
+      updatedAt: Number(meta.regularMarketTime) || points.at(-1).timestamp,
+    },
+    points: weeklyLastPoints(points),
+  }, 200, 300);
+}
+
+async function yahooIndexResponse(id, encodedSymbol, name, currency, fetchImpl) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodedSymbol}?range=1y&interval=1d&events=history`;
+  const response = await fetchImpl(url, { headers: { Accept: "application/json", "User-Agent": "MarketPanel/1.0" } });
+  const body = await response.json();
+  const result = body?.chart?.result?.[0];
+  if (!response.ok || !result || body?.chart?.error) {
+    throw new UpstreamError(body?.chart?.error?.description || `Yahoo returned HTTP ${response.status}`, 502);
+  }
+  const meta = result.meta || {};
+  const timestamps = result.timestamp || [];
+  const closes = result.indicators?.quote?.[0]?.close || [];
+  const points = timestamps.flatMap((timestamp, index) => {
+    const value = Number(closes[index]);
+    return Number.isFinite(value) && value > 0 ? [{ timestamp: Number(timestamp), value }] : [];
+  });
+  if (points.length < 2) throw new UpstreamError("Yahoo returned insufficient index history", 502);
+  const price = number(meta.regularMarketPrice ?? points.at(-1).value);
+  const previous = points.at(-2).value;
+  const change = price - previous;
+  return json({
+    id,
+    quote: {
+      symbol: id,
+      name: `${name} • 遅延値`,
+      exchange: meta.fullExchangeName || meta.exchangeName || "Yahoo Finance",
+      currency,
+      price,
+      change,
+      changePercent: previous === 0 ? 0 : change / previous * 100,
+      updatedAt: Number(meta.regularMarketTime) || points.at(-1).timestamp,
+    },
+    points: weeklyLastPoints(points),
+  }, 200, 300);
+}
+
+async function cboeVixResponse(fetchImpl) {
+  const url = "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv";
+  const response = await fetchImpl(url, { headers: { Accept: "text/csv" } });
+  if (!response.ok) throw new UpstreamError(`Cboe returned HTTP ${response.status}`, 502);
+  const rows = (await response.text()).trim().split(/\r?\n/).slice(1).flatMap((line) => {
+    const [date, , , , close] = line.split(",").map((value) => value.trim());
+    const [month, day, year] = date.split("/").map(Number);
+    const timestamp = Math.floor(Date.UTC(year, month - 1, day) / 1000);
+    const value = Number(close);
+    return Number.isFinite(timestamp) && Number.isFinite(value) ? [{ timestamp, value }] : [];
+  });
+  if (rows.length < 2) throw new UpstreamError("Cboe returned insufficient VIX history", 502);
+  const latest = rows.at(-1);
+  const previous = rows.at(-2);
+  const oneYearAgo = latest.timestamp - 366 * 24 * 60 * 60;
+  const oneYearRows = rows.filter((row) => row.timestamp >= oneYearAgo);
+  const weeklyRows = weeklyLastPoints(oneYearRows);
+  const change = latest.value - previous.value;
+  return json({
+    id: "VIX",
+    quote: {
+      symbol: "VIX",
+      name: "VIX指数 • 前営業日終値",
+      exchange: "Cboe",
+      currency: "PCT",
+      price: latest.value,
+      change,
+      changePercent: previous.value === 0 ? 0 : change / previous.value * 100,
+      updatedAt: latest.timestamp,
+    },
+    points: weeklyRows,
+  }, 200, 300);
+}
+
+function weeklyLastPoints(points) {
+  const weeks = new Map();
+  for (const point of points) {
+    const date = new Date(point.timestamp * 1_000);
+    const daysSinceMonday = (date.getUTCDay() + 6) % 7;
+    const weekStart = point.timestamp - daysSinceMonday * 24 * 60 * 60;
+    weeks.set(weekStart, point);
+  }
+  return [...weeks.values()].sort((a, b) => a.timestamp - b.timestamp);
+}
+
+async function storeLastGoodVix(kv, response) {
+  if (!kv) return;
+  await writeKvResponse(kv, VIX_LAST_GOOD_KEY, response, 30 * 24 * 60 * 60);
 }
 
 async function upstreamJson(endpoint, params, env, fetchImpl) {

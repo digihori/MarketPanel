@@ -23,7 +23,10 @@ import com.digihori.marketpanel.data.repository.LoadBatch
 import com.digihori.marketpanel.data.repository.LoadedValue
 import com.digihori.marketpanel.data.settings.SettingsStore
 import com.digihori.marketpanel.data.settings.AssetType
+import com.digihori.marketpanel.data.settings.MarketPanelSettings
+import com.digihori.marketpanel.data.settings.InstrumentDataSource
 import com.digihori.marketpanel.data.settings.WatchInstrument
+import com.digihori.marketpanel.data.settings.isNightModeScheduled
 import com.digihori.marketpanel.data.settings.resolveMainInstrumentDisplayNames
 import com.digihori.marketpanel.rotation.RotationController
 import com.digihori.marketpanel.ui.settings.SettingsActivity
@@ -37,6 +40,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.Calendar
 
 class DashboardActivity : Activity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -51,6 +55,7 @@ class DashboardActivity : Activity() {
     private lateinit var marketPanel: MarketPanelView
     private lateinit var apiUsageText: TextView
     private lateinit var rotationProgress: ProgressBar
+    private lateinit var nightOverlay: View
     private var rotationProgressAnimator: ObjectAnimator? = null
     private var started = false
     private var fullscreenEnabled = true
@@ -63,6 +68,10 @@ class DashboardActivity : Activity() {
     private var batteryReceiverRegistered = false
     private var configurationJob: Job? = null
     private var refreshJob: Job? = null
+    private var nightModeJob: Job? = null
+    private var nightModeActive = false
+    private var nightPreviewUntilMillis = 0L
+    private var normalScreenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
     private val stockPanelsById = linkedMapOf<String, DemoMarketData.StockPanels>()
     private val fundPanelsById = linkedMapOf<String, DemoMarketData.MarketPanel>()
     private val marketPanelsById = linkedMapOf<String, DemoMarketData.MarketPanel>()
@@ -101,6 +110,13 @@ class DashboardActivity : Activity() {
         apiUsageText = findViewById(R.id.apiUsageText)
         updateHeader()
         rotationProgress = findViewById(R.id.rotationProgress)
+        nightOverlay = findViewById(R.id.nightOverlay)
+        nightOverlay.setOnClickListener {
+            if (nightModeActive) {
+                nightPreviewUntilMillis = System.currentTimeMillis() + NIGHT_PREVIEW_MILLIS
+                updateNightVisual()
+            }
+        }
         stockIndex = savedInstanceState?.getInt(KEY_STOCK_INDEX) ?: 0
         fundIndex = savedInstanceState?.getInt(KEY_FUND_INDEX) ?: 0
         marketIndex = savedInstanceState?.getInt(KEY_MARKET_INDEX) ?: 0
@@ -125,6 +141,8 @@ class DashboardActivity : Activity() {
         configurationJob = scope.launch {
             configureRotations()
         }
+        nightModeJob?.cancel()
+        nightModeJob = scope.launch { monitorNightMode() }
     }
 
     override fun onStop() {
@@ -135,10 +153,12 @@ class DashboardActivity : Activity() {
         }
         configurationJob?.cancel()
         refreshJob?.cancel()
+        nightModeJob?.cancel()
         if (::stockRotation.isInitialized) stockRotation.stop()
         if (::fundRotation.isInitialized) fundRotation.stop()
         if (::marketRotation.isInitialized) marketRotation.stop()
         rotationProgressAnimator?.cancel()
+        leaveNightMode(restartDashboard = false)
         super.onStop()
     }
 
@@ -179,38 +199,45 @@ class DashboardActivity : Activity() {
         rotationProgress.progress = 0
         applySystemSettings(settings)
 
+        if (isNightModeNow(settings)) {
+            enterNightMode()
+            return
+        }
+
         if (::stockRotation.isInitialized) stockRotation.stop()
         if (::fundRotation.isInitialized) fundRotation.stop()
         if (::marketRotation.isInitialized) marketRotation.stop()
 
         val enabled = settings.instruments.filter { it.enabled }
         val stocks = enabled.filter { it.assetType == AssetType.US_STOCK || it.assetType == AssetType.US_ETF }
+        val japanStocks = enabled.filter { it.assetType == AssetType.JAPAN_STOCK || it.assetType == AssetType.JAPAN_ETF }
         val funds = enabled.filter { it.assetType == AssetType.FUND_REFERENCE }
         val markets = enabled.filter { it.assetType == AssetType.MARKET_INDEX }
         val stockIds = stocks.map { it.symbol }
+        val japanStockIds = japanStocks.map { it.symbol }
         val marketIds = markets.map { it.symbol }
         resolvedStockNamesBySymbol.clear()
         persistedAutoNameSymbols.clear()
         marketDisplayNamesById.clear()
         marketDisplayNamesById.putAll(markets.associate { it.symbol to it.displayName })
-        stockPanelsById.keys.retainAll(stockIds.toSet())
+        stockPanelsById.keys.retainAll((stockIds + japanStockIds).toSet())
         fundPanelsById.keys.retainAll(funds.map { it.id }.toSet())
         marketPanelsById.keys.retainAll(marketIds.toSet())
+        restartAllRotations(stockIds, japanStockIds, funds, marketIds, settings.rotationIntervalMillis)
         mainPanel.showStatus("読み込み中…")
-        intradayPanel.showStatus("参考値 • DEMO")
+        intradayPanel.showStatus("国内投信 • 読み込み中…")
         marketPanel.showStatus("読み込み中…")
         coroutineScope {
             listOf(
-                async { loadStocksProgressively(stockIds, settings.rotationIntervalMillis) },
+                async { loadStocksProgressively(stockIds, japanStockIds, settings.rotationIntervalMillis) },
+                async { loadJapanStocksProgressively(japanStocks, stockIds, japanStockIds, settings.rotationIntervalMillis) },
                 async { loadFundsProgressively(funds, settings.rotationIntervalMillis) },
                 async { loadMarketsProgressively(marketIds, settings.rotationIntervalMillis) },
             ).awaitAll()
         }
         if (!started) return
+        restartAllRotations(stockIds, japanStockIds, funds, marketIds, settings.rotationIntervalMillis)
         persistResolvedStockNames(settings)
-        restartStockRotation(stockIds.mapNotNull(stockPanelsById::get), settings.rotationIntervalMillis)
-        restartFundRotation(funds.mapNotNull { fundPanelsById[it.id] }, settings.rotationIntervalMillis)
-        restartMarketRotation(marketIds.mapNotNull(marketPanelsById::get), settings.rotationIntervalMillis)
         apiUsageDisplay = apiUsageRepository.displayText()
         updateHeader()
 
@@ -218,9 +245,69 @@ class DashboardActivity : Activity() {
         refreshJob = scope.launch {
             while (true) {
                 delay(settings.updateIntervalMillis)
-                refreshDisplayedData(settings, stockIds, marketIds)
+                refreshDisplayedData(settings, stockIds, japanStockIds, marketIds)
             }
         }
+    }
+
+    private suspend fun monitorNightMode() {
+        while (started) {
+            val settings = settingsStore.load()
+            val scheduled = isNightModeNow(settings)
+            when {
+                scheduled && !nightModeActive -> {
+                    configurationJob?.cancel()
+                    enterNightMode()
+                }
+                !scheduled && nightModeActive -> leaveNightMode(restartDashboard = true)
+                nightModeActive -> updateNightVisual()
+            }
+            delay(NIGHT_CHECK_INTERVAL_MILLIS)
+        }
+    }
+
+    private fun isNightModeNow(settings: MarketPanelSettings): Boolean {
+        if (!settings.nightModeEnabled) return false
+        val now = Calendar.getInstance()
+        val nowMinutes = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
+        return isNightModeScheduled(nowMinutes, settings.nightStartMinutes, settings.nightEndMinutes)
+    }
+
+    private fun enterNightMode() {
+        if (nightModeActive) return
+        nightModeActive = true
+        nightPreviewUntilMillis = 0L
+        normalScreenBrightness = window.attributes.screenBrightness
+        refreshJob?.cancel()
+        if (::stockRotation.isInitialized) stockRotation.stop()
+        if (::fundRotation.isInitialized) fundRotation.stop()
+        if (::marketRotation.isInitialized) marketRotation.stop()
+        rotationProgressAnimator?.cancel()
+        rotationProgress.progress = 0
+        updateNightVisual()
+    }
+
+    private fun leaveNightMode(restartDashboard: Boolean) {
+        if (!nightModeActive) return
+        nightModeActive = false
+        nightPreviewUntilMillis = 0L
+        nightOverlay.visibility = View.GONE
+        setScreenBrightness(normalScreenBrightness)
+        if (restartDashboard && started) {
+            configurationJob?.cancel()
+            configurationJob = scope.launch { configureRotations() }
+        }
+    }
+
+    private fun updateNightVisual() {
+        if (!nightModeActive) return
+        val previewing = System.currentTimeMillis() < nightPreviewUntilMillis
+        nightOverlay.visibility = if (previewing) View.GONE else View.VISIBLE
+        setScreenBrightness(if (previewing) normalScreenBrightness else NIGHT_SCREEN_BRIGHTNESS)
+    }
+
+    private fun setScreenBrightness(value: Float) {
+        window.attributes = window.attributes.apply { screenBrightness = value }
     }
 
     private suspend fun loadFundsProgressively(
@@ -230,14 +317,13 @@ class DashboardActivity : Activity() {
     ) {
         var loaded = 0
         var failed = 0
-        instruments.forEach { instrument ->
-            val panel = if (instrument.symbol in MARKET_INDICATOR_IDS) {
-                marketRepository.getMarkets(listOf(instrument.symbol), forceRefresh)
-                    .items.firstOrNull()?.value?.toFundPanel(instrument)
-            } else {
-                marketRepository.getStocks(listOf(instrument.symbol), "1y", forceRefresh)
-                    .items.firstOrNull()?.value?.toFundPanel(instrument)
+        val pending = coroutineScope {
+            instruments.map { instrument ->
+                async { instrument to fetchFundPanel(instrument, forceRefresh) }
             }
+        }
+        pending.forEach { deferred ->
+            val (instrument, panel) = deferred.await()
             if (!started) return
             panel?.let {
                 fundPanelsById[instrument.id] = it
@@ -261,8 +347,40 @@ class DashboardActivity : Activity() {
         }
     }
 
+    private suspend fun fetchFundPanel(
+        instrument: WatchInstrument,
+        forceRefresh: Boolean,
+    ): DemoMarketData.MarketPanel? = when {
+        instrument.dataSource == InstrumentDataSource.YAHOO_FUND ->
+            marketRepository.getFunds(listOf(instrument.symbol), forceRefresh)
+                .items.firstOrNull()?.value?.toActualFundPanel(instrument)
+                ?: loadFundReferenceFallback(instrument, forceRefresh)
+        instrument.symbol in MARKET_INDICATOR_IDS ->
+            marketRepository.getMarkets(listOf(instrument.symbol), forceRefresh)
+                .items.firstOrNull()?.value?.toFundPanel(instrument)
+        else ->
+            marketRepository.getStocks(listOf(instrument.symbol), "1y", forceRefresh)
+                .items.firstOrNull()?.value?.toFundPanel(instrument)
+    }
+
+    private suspend fun loadFundReferenceFallback(
+        instrument: WatchInstrument,
+        forceRefresh: Boolean,
+    ): DemoMarketData.MarketPanel? {
+        val reference = FUND_REFERENCE_FALLBACKS[instrument.symbol] ?: return null
+        val fallbackInstrument = instrument.copy(symbol = reference)
+        return if (reference in MARKET_INDICATOR_IDS) {
+            marketRepository.getMarkets(listOf(reference), forceRefresh)
+                .items.firstOrNull()?.value?.toFundPanel(fallbackInstrument)
+        } else {
+            marketRepository.getStocks(listOf(reference), "1y", forceRefresh)
+                .items.firstOrNull()?.value?.toFundPanel(fallbackInstrument)
+        }
+    }
+
     private suspend fun loadStocksProgressively(
         stockIds: List<String>,
+        japanStockIds: List<String>,
         intervalMillis: Long,
         forceRefresh: Boolean = false,
     ) {
@@ -276,8 +394,13 @@ class DashboardActivity : Activity() {
             batch.items.firstOrNull()?.let { result ->
                 resolvedStockNamesBySymbol[symbol] = result.value.quote.name
                 stockPanelsById[symbol] = result.value.toPanels()
-                val panels = stockIds.mapNotNull(stockPanelsById::get)
-                applyStocks(panels, intervalMillis)
+                applyStocks(
+                    interleaveMainPanels(
+                        stockIds.mapNotNull(stockPanelsById::get),
+                        japanStockIds.mapNotNull(stockPanelsById::get),
+                    ),
+                    intervalMillis,
+                )
             }
             mainPanel.showStatus(
                 "取得中 ${loaded.size + failed}/${stockIds.size} • 成功${loaded.size} • 失敗$failed",
@@ -290,6 +413,36 @@ class DashboardActivity : Activity() {
             "${result.statusText()} • 表示可能${loaded.size}/${stockIds.size}",
             result.isErrorStatus(),
         )
+    }
+
+    private suspend fun loadJapanStocksProgressively(
+        instruments: List<WatchInstrument>,
+        stockIds: List<String>,
+        japanStockIds: List<String>,
+        intervalMillis: Long,
+    ) = coroutineScope {
+        val results = instruments.map { instrument ->
+            async {
+                instrument to marketRepository.getJapanStocks(listOf(instrument.symbol))
+                    .items.firstOrNull()?.value
+            }
+        }.awaitAll()
+        results.forEach { (instrument, snapshot) ->
+            if (!started) return@coroutineScope
+            snapshot?.let {
+                resolvedStockNamesBySymbol[instrument.symbol] = it.quote.name
+                stockPanelsById[instrument.symbol] = it.toJapanStockPanels(instrument.displayName)
+            }
+        }
+        if (started) {
+            applyStocks(
+                interleaveMainPanels(
+                    stockIds.mapNotNull(stockPanelsById::get),
+                    japanStockIds.mapNotNull(stockPanelsById::get),
+                ),
+                intervalMillis,
+            )
+        }
     }
 
     private suspend fun loadMarketsProgressively(
@@ -449,13 +602,24 @@ class DashboardActivity : Activity() {
     private suspend fun refreshDisplayedData(
         settings: com.digihori.marketpanel.data.settings.MarketPanelSettings,
         stockIds: List<String>,
+        japanStockIds: List<String>,
         marketIds: List<String>,
     ) {
         mainPanel.showStatus("更新中…")
         marketPanel.showStatus("更新中…")
         coroutineScope {
             listOf(
-                async { loadStocksProgressively(stockIds, settings.rotationIntervalMillis, true) },
+                async { loadStocksProgressively(stockIds, japanStockIds, settings.rotationIntervalMillis, true) },
+                async {
+                    loadJapanStocksProgressively(
+                        settings.instruments.filter {
+                            it.enabled && (it.assetType == AssetType.JAPAN_STOCK || it.assetType == AssetType.JAPAN_ETF)
+                        },
+                        stockIds,
+                        japanStockIds,
+                        settings.rotationIntervalMillis,
+                    )
+                },
                 async {
                     loadFundsProgressively(
                         settings.instruments.filter { it.enabled && it.assetType == AssetType.FUND_REFERENCE },
@@ -467,9 +631,43 @@ class DashboardActivity : Activity() {
             ).awaitAll()
         }
         if (!started) return
+        val funds = settings.instruments.filter { it.enabled && it.assetType == AssetType.FUND_REFERENCE }
+        restartAllRotations(stockIds, japanStockIds, funds, marketIds, settings.rotationIntervalMillis)
         persistResolvedStockNames(settings)
         apiUsageDisplay = apiUsageRepository.displayText()
         updateHeader()
+    }
+
+    private fun interleaveMainPanels(
+        us: List<DemoMarketData.StockPanels>,
+        japan: List<DemoMarketData.StockPanels>,
+    ): List<DemoMarketData.StockPanels> {
+        if (us.isEmpty()) return japan
+        if (japan.isEmpty()) return us
+        return buildList {
+            repeat(maxOf(us.size, japan.size)) { index ->
+                us.getOrNull(index)?.let(::add)
+                japan.getOrNull(index)?.let(::add)
+            }
+        }
+    }
+
+    private fun restartAllRotations(
+        stockIds: List<String>,
+        japanStockIds: List<String>,
+        funds: List<WatchInstrument>,
+        marketIds: List<String>,
+        intervalMillis: Long,
+    ) {
+        restartStockRotation(
+            interleaveMainPanels(
+                stockIds.mapNotNull(stockPanelsById::get),
+                japanStockIds.mapNotNull(stockPanelsById::get),
+            ),
+            intervalMillis,
+        )
+        restartFundRotation(funds.mapNotNull { fundPanelsById[it.id] }, intervalMillis)
+        restartMarketRotation(marketIds.mapNotNull(marketPanelsById::get), intervalMillis)
     }
 
     private fun updateHeader() {
@@ -531,8 +729,18 @@ class DashboardActivity : Activity() {
             "VIX",
             "USDJPY",
         )
+        val FUND_REFERENCE_FALLBACKS = mapOf(
+            "EMAXIS_ALL_COUNTRY" to "ACWI",
+            "EMAXIS_SP500" to "VOO",
+            "IFREE_FANG_PLUS" to "FNGS",
+            "SBI_S_SCHD_4X" to "SCHD",
+            "TRACERS_NIKKEI_HD50" to "NIKKEI225",
+        )
         const val DEBUG_ROTATION_INTERVAL_MILLIS = 5_000L
         const val SUB1_PHASE_OFFSET_MILLIS = 10_000L
         const val SUB2_PHASE_OFFSET_MILLIS = 20_000L
+        const val NIGHT_CHECK_INTERVAL_MILLIS = 15_000L
+        const val NIGHT_PREVIEW_MILLIS = 30_000L
+        const val NIGHT_SCREEN_BRIGHTNESS = 0.01f
     }
 }

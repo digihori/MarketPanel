@@ -16,6 +16,6 @@ class MarketPanelSettingsTest {
         assertTrue(settings.enabledStocks.isNotEmpty())
         assertTrue(settings.enabledMarkets.isNotEmpty())
         assertTrue(settings.instruments.any { it.assetType == AssetType.FUND_REFERENCE })
-        assertTrue(settings.instruments.any { it.dataSource == InstrumentDataSource.REFERENCE_USD_JPY })
+        assertTrue(settings.instruments.any { it.dataSource == InstrumentDataSource.YAHOO_FUND })
     }
 }

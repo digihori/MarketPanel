@@ -68,8 +68,8 @@ object DemoMarketData {
         ),
         indicator(
             id = "VIX",
-            title = "VIX短期先物参考（VIXY）",
-            subtitle = "VIXY",
+            title = "VIX指数",
+            subtitle = "VIX • DEMO",
             price = "32.18",
             change = "-0.84  (-2.54%)",
             isPositive = false,

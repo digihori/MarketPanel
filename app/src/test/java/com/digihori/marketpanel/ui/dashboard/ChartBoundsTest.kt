@@ -5,11 +5,13 @@ import org.junit.Test
 
 class ChartBoundsTest {
     @Test
-    fun addsTwentyPercentOfDataRangeAboveAndBelow() {
+    fun addsPaddingAndRoundsBoundsOutwardToReadableTicks() {
         val bounds = calculateChartBounds(listOf(100f, 150f, 200f))!!
 
-        assertEquals(80f, bounds.minimum, 0.001f)
-        assertEquals(220f, bounds.maximum, 0.001f)
+        assertEquals(75f, bounds.minimum, 0.001f)
+        assertEquals(225f, bounds.maximum, 0.001f)
+        assertEquals(25f, bounds.tickStep!!, 0.001f)
+        assertEquals(listOf(75f, 125f, 175f, 225f), calculateAxisTicks(bounds))
     }
 
     @Test
@@ -18,6 +20,7 @@ class ChartBoundsTest {
 
         assertEquals(190f, bounds.minimum, 0.001f)
         assertEquals(210f, bounds.maximum, 0.001f)
+        assertEquals(listOf(190f, 200f, 210f), calculateAxisTicks(bounds))
     }
 
     @Test

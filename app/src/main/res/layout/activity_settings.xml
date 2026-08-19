@@ -34,6 +34,14 @@
             <CheckBox android:id="@+id/autoStart" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/auto_start" android:textColor="@color/text_primary" />
             <CheckBox android:id="@+id/keepScreenOn" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/keep_screen_on" android:textColor="@color/text_primary" />
             <CheckBox android:id="@+id/fullscreen" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/fullscreen" android:textColor="@color/text_primary" />
+            <CheckBox android:id="@+id/nightModeEnabled" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="夜間モード" android:textColor="@color/text_primary" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="42dp"
+                android:orientation="horizontal">
+                <Button android:id="@+id/nightStartButton" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="開始 23:00" android:textSize="11sp" />
+                <Button android:id="@+id/nightEndButton" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="終了 06:00" android:textSize="11sp" />
+            </LinearLayout>
             <Button android:id="@+id/apiLogButton" android:layout_width="match_parent" android:layout_height="46dp" android:layout_marginTop="8dp" android:text="APIログ" />
             <LinearLayout
                 android:layout_width="match_parent"
@@ -55,8 +63,9 @@
                 android:layout_width="match_parent"
                 android:layout_height="64dp"
                 android:orientation="horizontal">
-                <Button android:id="@+id/mainTab" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:includeFontPadding="false" android:minHeight="0dp" android:minWidth="0dp" android:padding="2dp" android:text="MAIN\n米国株・ETF" android:textSize="13sp" />
-                <Button android:id="@+id/sub1Tab" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:includeFontPadding="false" android:minHeight="0dp" android:minWidth="0dp" android:padding="2dp" android:text="SUB1\n投信参考" android:textSize="13sp" />
+                <Button android:id="@+id/mainTab" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:includeFontPadding="false" android:minHeight="0dp" android:minWidth="0dp" android:padding="2dp" android:text="MAIN1\n米国株" android:textSize="12sp" />
+                <Button android:id="@+id/main2Tab" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:includeFontPadding="false" android:minHeight="0dp" android:minWidth="0dp" android:padding="2dp" android:text="MAIN2\n日本株" android:textSize="12sp" />
+                <Button android:id="@+id/sub1Tab" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:includeFontPadding="false" android:minHeight="0dp" android:minWidth="0dp" android:padding="2dp" android:text="SUB1\n国内投信" android:textSize="12sp" />
                 <Button android:id="@+id/sub2Tab" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:gravity="center" android:includeFontPadding="false" android:minHeight="0dp" android:minWidth="0dp" android:padding="2dp" android:text="SUB2\n指標・為替" android:textSize="13sp" />
             </LinearLayout>
 

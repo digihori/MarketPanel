@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap
 class MarketRepository(
     private val provider: StockDataProvider,
     private val cache: MarketCacheDataSource,
-    private val quoteLifetimeMillis: Long = 2 * 60 * 60 * 1_000L,
+    private val quoteLifetimeMillis: Long = 4 * 60 * 60 * 1_000L,
     private val chartLifetimeMillis: Long = 24 * 60 * 60 * 1_000L,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
@@ -37,6 +37,22 @@ class MarketRepository(
         val results = ids.map { id ->
             async { getMarket(id, forceRefresh) }
         }.awaitAll()
+        LoadBatch(results.filterNotNull(), results.count { it == null })
+    }
+
+    suspend fun getFunds(
+        ids: List<String>,
+        forceRefresh: Boolean = false,
+    ): LoadBatch<MarketSnapshot> = supervisorScope {
+        val results = ids.map { id -> async { getFund(id, forceRefresh) } }.awaitAll()
+        LoadBatch(results.filterNotNull(), results.count { it == null })
+    }
+
+    suspend fun getJapanStocks(
+        symbols: List<String>,
+        forceRefresh: Boolean = false,
+    ): LoadBatch<MarketSnapshot> = supervisorScope {
+        val results = symbols.map { symbol -> async { getJapanStock(symbol, forceRefresh) } }.awaitAll()
         LoadBatch(results.filterNotNull(), results.count { it == null })
     }
 
@@ -101,12 +117,43 @@ class MarketRepository(
     }
 
     private suspend fun getMarketUnlocked(id: String, forceRefresh: Boolean): LoadedValue<MarketSnapshot>? {
-        val cached = cache.findMarket(id)
+        val cacheId = "market:history-v4:$id"
+        val cached = cache.findMarket(cacheId)
         if (cached != null && now() - cached.fetchedAtEpochMillis < quoteLifetimeMillis) {
             return LoadedValue(cached.value, DataOrigin.CACHE_FRESH)
         }
         return runCatching { provider.getMarketIndicator(id) }
-            .onSuccess { cache.saveMarket(id, it, now()) }
+            .onSuccess { cache.saveMarket(cacheId, it, now()) }
+            .getOrNull()?.let { LoadedValue(it, DataOrigin.NETWORK) }
+            ?: cached?.value?.let { LoadedValue(it, DataOrigin.CACHE_STALE) }
+    }
+
+    private suspend fun getFund(
+        id: String,
+        forceRefresh: Boolean,
+    ): LoadedValue<MarketSnapshot>? = requestLocks.getOrPut("fund:$id") { Mutex() }.withLock {
+        val cacheId = "fund:history-v2:$id"
+        val cached = cache.findMarket(cacheId)
+        if (cached != null && now() - cached.fetchedAtEpochMillis < chartLifetimeMillis) {
+            return@withLock LoadedValue(cached.value, DataOrigin.CACHE_FRESH)
+        }
+        runCatching { provider.getFund(id) }
+            .onSuccess { cache.saveMarket(cacheId, it, now()) }
+            .getOrNull()?.let { LoadedValue(it, DataOrigin.NETWORK) }
+            ?: cached?.value?.let { LoadedValue(it, DataOrigin.CACHE_STALE) }
+    }
+
+    private suspend fun getJapanStock(
+        symbol: String,
+        forceRefresh: Boolean,
+    ): LoadedValue<MarketSnapshot>? = requestLocks.getOrPut("jp-stock:$symbol") { Mutex() }.withLock {
+        val cacheId = "jp-stock:history-v4:$symbol"
+        val cached = cache.findMarket(cacheId)
+        if (cached != null && now() - cached.fetchedAtEpochMillis < quoteLifetimeMillis) {
+            return@withLock LoadedValue(cached.value, DataOrigin.CACHE_FRESH)
+        }
+        runCatching { provider.getJapanStock(symbol) }
+            .onSuccess { cache.saveMarket(cacheId, it, now()) }
             .getOrNull()?.let { LoadedValue(it, DataOrigin.NETWORK) }
             ?: cached?.value?.let { LoadedValue(it, DataOrigin.CACHE_STALE) }
     }

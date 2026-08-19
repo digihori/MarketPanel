@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+<LinearLayout
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/panel_background"
@@ -57,5 +62,15 @@
         android:max="1000"
         android:progress="0"
         android:progressBackgroundTint="@color/panel_divider"
-        android:progressTint="@color/chart_primary" />
+        android:progressTint="@color/text_secondary" />
 </LinearLayout>
+
+    <View
+        android:id="@+id/nightOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#000000"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone" />
+</FrameLayout>

@@ -9,3 +9,4 @@ worker/.dev.vars
 .gradle-local/
 .kotlin/
 worker/.wrangler/
+app/release/

@@ -14,11 +14,15 @@ data class SettingsBackup(
     val keepScreenOn: Boolean,
     val fullscreen: Boolean,
     val instruments: List<WatchInstrument>,
+    val nightModeEnabled: Boolean = false,
+    val nightStartMinutes: Int = 23 * 60,
+    val nightEndMinutes: Int = 6 * 60,
 ) {
     fun validate() {
         require(format == FORMAT) { "MarketPanelのバックアップではありません" }
         require(version == VERSION) { "未対応のバックアップバージョンです: $version" }
         require(rotationIntervalMillis > 0 && updateIntervalMillis > 0) { "更新間隔が不正です" }
+        require(nightStartMinutes in 0..1439 && nightEndMinutes in 0..1439) { "夜間モードの時刻が不正です" }
         require(instruments.map { it.id }.distinct().size == instruments.size) { "銘柄IDが重複しています" }
         require(instruments.all { it.id.isNotBlank() && it.displayName.isNotBlank() && it.symbol.isNotBlank() }) {
             "入力が不足している銘柄があります"
@@ -37,6 +41,9 @@ data class SettingsBackup(
             autoStart = autoStart,
             keepScreenOn = keepScreenOn,
             fullscreen = fullscreen,
+            nightModeEnabled = nightModeEnabled,
+            nightStartMinutes = nightStartMinutes,
+            nightEndMinutes = nightEndMinutes,
             instruments = instruments,
         )
     }
@@ -44,7 +51,7 @@ data class SettingsBackup(
     companion object {
         const val FORMAT = "MarketPanel settings"
         const val VERSION = 1
-        private val MAIN_TYPES = setOf(AssetType.US_STOCK, AssetType.US_ETF)
+        private val MAIN_TYPES = setOf(AssetType.US_STOCK, AssetType.US_ETF, AssetType.JAPAN_STOCK, AssetType.JAPAN_ETF)
 
         fun from(settings: MarketPanelSettings) = SettingsBackup(
             rotationIntervalMillis = settings.rotationIntervalMillis,
@@ -54,6 +61,9 @@ data class SettingsBackup(
             keepScreenOn = settings.keepScreenOn,
             fullscreen = settings.fullscreen,
             instruments = settings.instruments,
+            nightModeEnabled = settings.nightModeEnabled,
+            nightStartMinutes = settings.nightStartMinutes,
+            nightEndMinutes = settings.nightEndMinutes,
         )
     }
 }

@@ -237,13 +237,14 @@ class MarketPanelView @JvmOverloads constructor(
 
     private fun axisValue(value: Float, unit: String): String {
         val formatter = NumberFormat.getNumberInstance(Locale.US).apply {
-            minimumFractionDigits = if (unit == "USD" || unit == "RATE") 2 else 0
+            minimumFractionDigits = if (unit == "USD" || unit == "RATE" || unit == "PCT") 2 else 0
             maximumFractionDigits = if (unit == "JPY") 0 else 2
         }
         val formatted = formatter.format(value)
         return when (unit) {
             "USD" -> "\$$formatted"
             "JPY" -> "¥$formatted"
+            "PCT" -> "$formatted%"
             else -> formatted
         }
     }
@@ -252,6 +253,7 @@ class MarketPanelView @JvmOverloads constructor(
         "USD" -> "価格（USD）"
         "JPY" -> "価格（円）"
         "RATE" -> "為替レート"
+        "PCT" -> "予想変動率（年率）"
         else -> "指数値"
     }
 
@@ -276,7 +278,11 @@ class MarketPanelView @JvmOverloads constructor(
     private fun color(resource: Int): Int = resources.getColor(resource)
 }
 
-internal data class ChartBounds(val minimum: Float, val maximum: Float)
+internal data class ChartBounds(
+    val minimum: Float,
+    val maximum: Float,
+    val tickStep: Float? = null,
+)
 
 internal fun calculateChartBounds(points: List<Float>): ChartBounds? {
     val dataMinimum = points.minOrNull() ?: return null
@@ -287,22 +293,31 @@ internal fun calculateChartBounds(points: List<Float>): ChartBounds? {
     } else {
         max(abs(dataMinimum) * 0.05f, 1f)
     }
-    return ChartBounds(dataMinimum - padding, dataMaximum + padding)
+    val paddedMinimum = dataMinimum - padding
+    val paddedMaximum = dataMaximum + padding
+    val step = niceStep((paddedMaximum - paddedMinimum) / 4f)
+    val axisMinimum = floor(paddedMinimum / step) * step
+    val axisMaximum = ceil(paddedMaximum / step) * step
+    return ChartBounds(axisMinimum, axisMaximum, step)
 }
 
 internal fun calculateAxisTicks(bounds: ChartBounds): List<Float> {
     val range = bounds.maximum - bounds.minimum
     if (!range.isFinite() || range <= 0f) return emptyList()
-    val step = niceStep(range / 3f)
-    val first = ceil(bounds.minimum / step) * step
+    val step = bounds.tickStep ?: niceStep(range / 3f)
+    val first = if (bounds.tickStep != null) bounds.minimum else ceil(bounds.minimum / step) * step
     val ticks = mutableListOf<Float>()
     var tick = first
-    while (tick <= bounds.maximum + step * 0.001f && ticks.size < 4) {
+    while (tick <= bounds.maximum + step * 0.001f && ticks.size < 8) {
         // Remove insignificant floating point noise before formatting.
         ticks += (tick / step).roundToInt() * step
         tick += step
     }
-    return ticks
+    return if (bounds.tickStep != null && ticks.size > 4) {
+        ticks.filterIndexed { index, _ -> index % 2 == 0 || index == ticks.lastIndex }
+    } else {
+        ticks
+    }
 }
 
 private fun niceStep(value: Float): Float {

@@ -18,6 +18,12 @@ interface MarketPanelApi {
         @Query("interval") interval: String,
     ): ApiSeriesResponse
 
-    @GET("v1/markets/{id}")
+    @GET("v1/markets/{id}?history=v4")
     suspend fun getMarket(@Path("id") id: String): ApiMarketResponse
+
+    @GET("v1/funds/{id}?history=v2")
+    suspend fun getFund(@Path("id") id: String): ApiMarketResponse
+
+    @GET("v1/jp-stocks/{symbol}?history=v4")
+    suspend fun getJapanStock(@Path("symbol") symbol: String): ApiMarketResponse
 }

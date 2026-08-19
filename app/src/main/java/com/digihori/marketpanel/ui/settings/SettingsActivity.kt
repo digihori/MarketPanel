@@ -2,6 +2,7 @@ package com.digihori.marketpanel.ui.settings
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.TimePickerDialog
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
@@ -46,10 +47,14 @@ class SettingsActivity : Activity() {
     private lateinit var intervalSpinner: Spinner
     private lateinit var updateSpinner: Spinner
     private lateinit var sectionTitle: TextView
+    private lateinit var nightStartButton: Button
+    private lateinit var nightEndButton: Button
     private lateinit var adapter: InstrumentAdapter
     private var loadedSettings = MarketPanelSettings()
     private val instruments = mutableListOf<WatchInstrument>()
     private var selectedPanel = SettingsPanel.MAIN
+    private var nightStartMinutes = 23 * 60
+    private var nightEndMinutes = 6 * 60
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,6 +63,8 @@ class SettingsActivity : Activity() {
         intervalSpinner = findViewById(R.id.rotationIntervalSpinner)
         updateSpinner = findViewById(R.id.updateIntervalSpinner)
         sectionTitle = findViewById(R.id.instrumentSectionTitle)
+        nightStartButton = findViewById(R.id.nightStartButton)
+        nightEndButton = findViewById(R.id.nightEndButton)
         intervalSpinner.adapter = spinnerAdapter(INTERVAL_LABELS)
         updateSpinner.adapter = spinnerAdapter(UPDATE_INTERVAL_LABELS)
 
@@ -73,12 +80,15 @@ class SettingsActivity : Activity() {
         }
 
         findViewById<Button>(R.id.mainTab).setOnClickListener { selectPanel(SettingsPanel.MAIN) }
+        findViewById<Button>(R.id.main2Tab).setOnClickListener { selectPanel(SettingsPanel.MAIN2) }
         findViewById<Button>(R.id.sub1Tab).setOnClickListener { selectPanel(SettingsPanel.SUB1) }
         findViewById<Button>(R.id.sub2Tab).setOnClickListener { selectPanel(SettingsPanel.SUB2) }
         findViewById<Button>(R.id.addInstrumentButton).setOnClickListener { showAddDialog() }
         findViewById<Button>(R.id.apiLogButton).setOnClickListener { showApiLog() }
         findViewById<Button>(R.id.backupButton).setOnClickListener { createBackupDocument() }
         findViewById<Button>(R.id.restoreButton).setOnClickListener { openBackupDocument() }
+        nightStartButton.setOnClickListener { showTimePicker(nightStartMinutes) { nightStartMinutes = it; updateNightTimeButtons() } }
+        nightEndButton.setOnClickListener { showTimePicker(nightEndMinutes) { nightEndMinutes = it; updateNightTimeButtons() } }
         findViewById<Button>(R.id.cancelButton).setOnClickListener { finish() }
         findViewById<Button>(R.id.saveButton).setOnClickListener { saveAndClose() }
 
@@ -95,6 +105,10 @@ class SettingsActivity : Activity() {
         setChecked(R.id.autoStart, settings.autoStart)
         setChecked(R.id.keepScreenOn, settings.keepScreenOn)
         setChecked(R.id.fullscreen, settings.fullscreen)
+        setChecked(R.id.nightModeEnabled, settings.nightModeEnabled)
+        nightStartMinutes = settings.nightStartMinutes
+        nightEndMinutes = settings.nightEndMinutes
+        updateNightTimeButtons()
         renderInstruments()
     }
 
@@ -103,6 +117,7 @@ class SettingsActivity : Activity() {
         sectionTitle.text = panel.title
         listOf(
             R.id.mainTab to SettingsPanel.MAIN,
+            R.id.main2Tab to SettingsPanel.MAIN2,
             R.id.sub1Tab to SettingsPanel.SUB1,
             R.id.sub2Tab to SettingsPanel.SUB2,
         ).forEach { (id, item) ->
@@ -131,6 +146,7 @@ class SettingsActivity : Activity() {
     private fun showAddDialog() {
         when (selectedPanel) {
             SettingsPanel.MAIN -> showMainEditor(null)
+            SettingsPanel.MAIN2 -> showJapanEditor(null)
             SettingsPanel.SUB1 -> showFundEditor(null)
             SettingsPanel.SUB2 -> showMarketPicker()
         }
@@ -139,6 +155,7 @@ class SettingsActivity : Activity() {
     private fun showEditDialog(item: WatchInstrument) {
         when (SettingsPanel.of(item)) {
             SettingsPanel.MAIN -> showMainEditor(item)
+            SettingsPanel.MAIN2 -> showJapanEditor(item)
             SettingsPanel.SUB1 -> showFundEditor(item)
             SettingsPanel.SUB2 -> showMarketEditor(item)
         }
@@ -169,6 +186,35 @@ class SettingsActivity : Activity() {
         }
     }
 
+    private fun showJapanEditor(current: WatchInstrument?) {
+        val symbol = symbolInput(current?.symbol)
+        val name = textInput("表示名（未入力なら取得時に補完）", current?.displayName)
+        val type = Spinner(this).apply {
+            adapter = spinnerAdapter(listOf("日本株", "国内ETF"))
+            setSelection(if (current?.assetType == AssetType.JAPAN_ETF) 1 else 0)
+        }
+        showEditorDialog(
+            title = if (current == null) "日本株・国内ETFを追加" else "日本株・国内ETFを編集",
+            fields = listOf(
+                labeled("証券コード（例: 7203、1489）", symbol),
+                labeled("表示名（任意）", name),
+                labeled("種別", type),
+            ),
+            current = current,
+        ) {
+            val symbolText = symbol.text.toString().trim().uppercase(Locale.US).removeSuffix(".T")
+            if (!JAPAN_SYMBOL.matches(symbolText)) return@showEditorDialog null
+            WatchInstrument(
+                id = current?.id ?: "custom_${UUID.randomUUID()}",
+                displayName = name.text.toString().trim().ifBlank { symbolText },
+                symbol = symbolText,
+                assetType = if (type.selectedItemPosition == 1) AssetType.JAPAN_ETF else AssetType.JAPAN_STOCK,
+                dataSource = InstrumentDataSource.YAHOO_JAPAN,
+                enabled = current?.enabled ?: true,
+            )
+        }
+    }
+
     private fun showFundEditor(current: WatchInstrument?) {
         val presets = DefaultWatchInstruments.items.filter { it.assetType == AssetType.FUND_REFERENCE }
         val preset = Spinner(this).apply {
@@ -188,12 +234,12 @@ class SettingsActivity : Activity() {
             }
         }
         showEditorDialog(
-            title = if (current == null) "国内投信参考を追加" else "国内投信参考を編集",
+            title = if (current == null) "国内投信を追加" else "国内投信を編集",
             fields = buildList {
                 if (current == null) add(labeled("プリセット", preset))
                 add(labeled("表示名", name))
-                add(labeled("参照ETF・市場ID", symbol))
-                add(note("参照先の市場価格と値動きを表示します。実際の投信基準価額ではありません。"))
+                add(labeled("投信ID・投信コード・参照シンボル", symbol))
+                add(note("プリセットと8桁の投信コードは実基準価額を表示します。それ以外は参照ETF・市場の値動きを表示します。"))
             },
             current = current,
         ) {
@@ -201,12 +247,17 @@ class SettingsActivity : Activity() {
             val nameText = name.text.toString().trim()
             if (symbolText.isBlank() || nameText.isBlank()) return@showEditorDialog null
             val marketReference = symbolText in MARKET_REFERENCE_IDS
+            val directFund = presets.any { it.symbol == symbolText } || FUND_CODE.matches(symbolText)
             WatchInstrument(
                 id = current?.id ?: "custom_${UUID.randomUUID()}",
                 displayName = nameText,
                 symbol = symbolText,
                 assetType = AssetType.FUND_REFERENCE,
-                dataSource = if (marketReference) InstrumentDataSource.TWELVE_DATA else InstrumentDataSource.REFERENCE_USD_JPY,
+                dataSource = when {
+                    directFund -> InstrumentDataSource.YAHOO_FUND
+                    marketReference -> InstrumentDataSource.TWELVE_DATA
+                    else -> InstrumentDataSource.REFERENCE_USD_JPY
+                },
                 enabled = current?.enabled ?: true,
             )
         }
@@ -415,9 +466,29 @@ class SettingsActivity : Activity() {
             autoStart = isChecked(R.id.autoStart),
             keepScreenOn = isChecked(R.id.keepScreenOn),
             fullscreen = isChecked(R.id.fullscreen),
+            nightModeEnabled = isChecked(R.id.nightModeEnabled),
+            nightStartMinutes = nightStartMinutes,
+            nightEndMinutes = nightEndMinutes,
             instruments = instruments.toList(),
         )
     }
+
+    private fun showTimePicker(initialMinutes: Int, onSelected: (Int) -> Unit) {
+        TimePickerDialog(
+            this,
+            { _, hour, minute -> onSelected(hour * 60 + minute) },
+            initialMinutes / 60,
+            initialMinutes % 60,
+            true,
+        ).show()
+    }
+
+    private fun updateNightTimeButtons() {
+        nightStartButton.text = "開始 ${formatTime(nightStartMinutes)}"
+        nightEndButton.text = "終了 ${formatTime(nightEndMinutes)}"
+    }
+
+    private fun formatTime(minutes: Int) = String.format(Locale.US, "%02d:%02d", minutes / 60, minutes % 60)
 
     private fun saveAndClose() {
         scope.launch {
@@ -468,8 +539,9 @@ class SettingsActivity : Activity() {
     private fun color(id: Int) = resources.getColor(id)
 
     private enum class SettingsPanel(val title: String) {
-        MAIN("MAIN・米国株／ETF"),
-        SUB1("SUB1・国内投信の参考ETF"),
+        MAIN("MAIN1・米国株／ETF"),
+        MAIN2("MAIN2・日本株／国内ETF"),
+        SUB1("SUB1・国内投信の基準価額"),
         SUB2("SUB2・市場指標／為替");
 
         fun contains(item: WatchInstrument) = of(item) == this
@@ -477,6 +549,7 @@ class SettingsActivity : Activity() {
         companion object {
             fun of(item: WatchInstrument) = when (item.assetType) {
                 AssetType.US_STOCK, AssetType.US_ETF -> MAIN
+                AssetType.JAPAN_STOCK, AssetType.JAPAN_ETF -> MAIN2
                 AssetType.FUND_REFERENCE -> SUB1
                 AssetType.MARKET_INDEX -> SUB2
             }
@@ -486,8 +559,10 @@ class SettingsActivity : Activity() {
     private companion object {
         const val REQUEST_CREATE_BACKUP = 401
         const val REQUEST_OPEN_BACKUP = 402
-        val MAIN_TYPES = setOf(AssetType.US_STOCK, AssetType.US_ETF)
+        val MAIN_TYPES = setOf(AssetType.US_STOCK, AssetType.US_ETF, AssetType.JAPAN_STOCK, AssetType.JAPAN_ETF)
         val MARKET_REFERENCE_IDS = setOf("NIKKEI225", "SP500", "DOW30", "NASDAQ100", "VIX", "USDJPY")
+        val FUND_CODE = Regex("^[0-9A-Z]{8}$")
+        val JAPAN_SYMBOL = Regex("^[0-9A-Z]{4,6}$")
         val INTERVAL_LABELS = listOf("5秒（デバッグ用）", "30秒", "60秒", "3分", "5分")
         val INTERVAL_VALUES = listOf(5_000L, 30_000L, 60_000L, 180_000L, 300_000L)
         val UPDATE_INTERVAL_LABELS = listOf("1分", "5分", "15分", "30分")
