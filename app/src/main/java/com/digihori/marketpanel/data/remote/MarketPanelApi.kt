@@ -8,22 +8,22 @@ interface MarketPanelApi {
     @GET("v1/usage")
     suspend fun getUsage(): ApiUsageResponse
 
-    @GET("v1/quotes/{symbol}")
+    @GET("v1/quotes/{symbol}?cache=eod-v1")
     suspend fun getQuote(@Path("symbol") symbol: String): ApiQuoteResponse
 
-    @GET("v1/charts/{symbol}")
+    @GET("v1/charts/{symbol}?cache=eod-v1")
     suspend fun getChart(
         @Path("symbol") symbol: String,
         @Query("range") range: String,
         @Query("interval") interval: String,
     ): ApiSeriesResponse
 
-    @GET("v1/markets/{id}?history=v4")
+    @GET("v1/markets/{id}?history=v6")
     suspend fun getMarket(@Path("id") id: String): ApiMarketResponse
 
-    @GET("v1/funds/{id}?history=v2")
+    @GET("v1/funds/{id}?history=v3")
     suspend fun getFund(@Path("id") id: String): ApiMarketResponse
 
-    @GET("v1/jp-stocks/{symbol}?history=v4")
+    @GET("v1/jp-stocks/{symbol}?history=v5")
     suspend fun getJapanStock(@Path("symbol") symbol: String): ApiMarketResponse
 }

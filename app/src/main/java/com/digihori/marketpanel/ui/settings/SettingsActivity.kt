@@ -27,6 +27,7 @@ import com.digihori.marketpanel.data.settings.AssetType
 import com.digihori.marketpanel.data.settings.DefaultWatchInstruments
 import com.digihori.marketpanel.data.settings.InstrumentDataSource
 import com.digihori.marketpanel.data.settings.MarketPanelSettings
+import com.digihori.marketpanel.data.settings.DataRefreshMode
 import com.digihori.marketpanel.data.settings.SettingsBackupJson
 import com.digihori.marketpanel.data.settings.SettingsStore
 import com.digihori.marketpanel.data.settings.WatchInstrument
@@ -101,7 +102,7 @@ class SettingsActivity : Activity() {
         instruments.clear()
         instruments += settings.instruments
         intervalSpinner.setSelection(INTERVAL_VALUES.indexOf(settings.rotationIntervalMillis).coerceAtLeast(0))
-        updateSpinner.setSelection(UPDATE_INTERVAL_VALUES.indexOf(settings.updateIntervalMillis).coerceAtLeast(0))
+        updateSpinner.setSelection(DataRefreshMode.entries.indexOf(settings.dataRefreshMode).coerceAtLeast(0))
         setChecked(R.id.autoStart, settings.autoStart)
         setChecked(R.id.keepScreenOn, settings.keepScreenOn)
         setChecked(R.id.fullscreen, settings.fullscreen)
@@ -459,7 +460,8 @@ class SettingsActivity : Activity() {
         val enabledMarkets = instruments.filter { it.enabled && it.assetType == AssetType.MARKET_INDEX }.mapTo(mutableSetOf()) { it.symbol }
         return loadedSettings.copy(
             rotationIntervalMillis = INTERVAL_VALUES[intervalSpinner.selectedItemPosition],
-            updateIntervalMillis = UPDATE_INTERVAL_VALUES[updateSpinner.selectedItemPosition],
+            updateIntervalMillis = DataRefreshMode.entries[updateSpinner.selectedItemPosition].checkIntervalMillis,
+            dataRefreshMode = DataRefreshMode.entries[updateSpinner.selectedItemPosition],
             enabledStocks = enabledStocks,
             enabledFunds = enabledFunds,
             enabledMarkets = enabledMarkets,
@@ -565,7 +567,6 @@ class SettingsActivity : Activity() {
         val JAPAN_SYMBOL = Regex("^[0-9A-Z]{4,6}$")
         val INTERVAL_LABELS = listOf("5秒（デバッグ用）", "30秒", "60秒", "3分", "5分")
         val INTERVAL_VALUES = listOf(5_000L, 30_000L, 60_000L, 180_000L, 300_000L)
-        val UPDATE_INTERVAL_LABELS = listOf("1分", "5分", "15分", "30分")
-        val UPDATE_INTERVAL_VALUES = listOf(60_000L, 300_000L, 900_000L, 1_800_000L)
+        val UPDATE_INTERVAL_LABELS = DataRefreshMode.entries.map { it.label }
     }
 }

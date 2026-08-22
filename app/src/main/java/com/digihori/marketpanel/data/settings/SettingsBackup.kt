@@ -9,6 +9,7 @@ data class SettingsBackup(
     val version: Int = VERSION,
     val rotationIntervalMillis: Long,
     val updateIntervalMillis: Long,
+    val dataRefreshMode: String = DataRefreshMode.CLOSE_ONLY.name,
     val chartPeriod: String,
     val autoStart: Boolean,
     val keepScreenOn: Boolean,
@@ -34,6 +35,8 @@ data class SettingsBackup(
         return MarketPanelSettings(
             rotationIntervalMillis = rotationIntervalMillis,
             updateIntervalMillis = updateIntervalMillis,
+            dataRefreshMode = runCatching { DataRefreshMode.valueOf(dataRefreshMode) }
+                .getOrDefault(DataRefreshMode.CLOSE_ONLY),
             chartPeriod = chartPeriod,
             enabledStocks = instruments.filter { it.enabled && it.assetType in MAIN_TYPES }.mapTo(mutableSetOf()) { it.symbol },
             enabledFunds = instruments.filter { it.enabled && it.assetType == AssetType.FUND_REFERENCE }.mapTo(mutableSetOf()) { it.id },
@@ -56,6 +59,7 @@ data class SettingsBackup(
         fun from(settings: MarketPanelSettings) = SettingsBackup(
             rotationIntervalMillis = settings.rotationIntervalMillis,
             updateIntervalMillis = settings.updateIntervalMillis,
+            dataRefreshMode = settings.dataRefreshMode.name,
             chartPeriod = settings.chartPeriod,
             autoStart = settings.autoStart,
             keepScreenOn = settings.keepScreenOn,

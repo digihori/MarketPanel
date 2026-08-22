@@ -23,6 +23,7 @@ import com.digihori.marketpanel.data.repository.LoadBatch
 import com.digihori.marketpanel.data.repository.LoadedValue
 import com.digihori.marketpanel.data.settings.SettingsStore
 import com.digihori.marketpanel.data.settings.AssetType
+import com.digihori.marketpanel.data.settings.DataRefreshMode
 import com.digihori.marketpanel.data.settings.MarketPanelSettings
 import com.digihori.marketpanel.data.settings.InstrumentDataSource
 import com.digihori.marketpanel.data.settings.WatchInstrument
@@ -41,6 +42,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Calendar
+import java.util.TimeZone
 
 class DashboardActivity : Activity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -194,6 +196,7 @@ class DashboardActivity : Activity() {
         val settings = settingsStore.load()
         if (!started) return
         currentRotationIntervalMillis = settings.rotationIntervalMillis
+        marketRepository.setRefreshMode(settings.dataRefreshMode)
         rotationProgressAnimator?.cancel()
         rotationProgressAnimator = null
         rotationProgress.progress = 0
@@ -244,7 +247,7 @@ class DashboardActivity : Activity() {
         refreshJob?.cancel()
         refreshJob = scope.launch {
             while (true) {
-                delay(settings.updateIntervalMillis)
+                delay(nextRefreshDelayMillis(settings.dataRefreshMode))
                 refreshDisplayedData(settings, stockIds, japanStockIds, marketIds)
             }
         }
@@ -337,7 +340,9 @@ class DashboardActivity : Activity() {
         }
         if (instruments.isNotEmpty()) {
             val result = LoadBatch(instruments.mapNotNull { instrument ->
-                fundPanelsById[instrument.id]?.let { LoadedValue(it, com.digihori.marketpanel.data.repository.DataOrigin.CACHE_FRESH) }
+                fundPanelsById[instrument.id]?.let {
+                    LoadedValue(it, com.digihori.marketpanel.data.repository.DataOrigin.CACHE_FRESH, System.currentTimeMillis())
+                }
             }, failed)
             showDataStatus(
                 intradayPanel,
@@ -353,14 +358,14 @@ class DashboardActivity : Activity() {
     ): DemoMarketData.MarketPanel? = when {
         instrument.dataSource == InstrumentDataSource.YAHOO_FUND ->
             marketRepository.getFunds(listOf(instrument.symbol), forceRefresh)
-                .items.firstOrNull()?.value?.toActualFundPanel(instrument)
+                .items.firstOrNull()?.let { it.value.toActualFundPanel(instrument, it.checkedAtEpochMillis) }
                 ?: loadFundReferenceFallback(instrument, forceRefresh)
         instrument.symbol in MARKET_INDICATOR_IDS ->
             marketRepository.getMarkets(listOf(instrument.symbol), forceRefresh)
-                .items.firstOrNull()?.value?.toFundPanel(instrument)
+                .items.firstOrNull()?.let { it.value.toFundPanel(instrument, it.checkedAtEpochMillis) }
         else ->
             marketRepository.getStocks(listOf(instrument.symbol), "1y", forceRefresh)
-                .items.firstOrNull()?.value?.toFundPanel(instrument)
+                .items.firstOrNull()?.let { it.value.toFundPanel(instrument, it.checkedAtEpochMillis) }
     }
 
     private suspend fun loadFundReferenceFallback(
@@ -371,10 +376,10 @@ class DashboardActivity : Activity() {
         val fallbackInstrument = instrument.copy(symbol = reference)
         return if (reference in MARKET_INDICATOR_IDS) {
             marketRepository.getMarkets(listOf(reference), forceRefresh)
-                .items.firstOrNull()?.value?.toFundPanel(fallbackInstrument)
+                .items.firstOrNull()?.let { it.value.toFundPanel(fallbackInstrument, it.checkedAtEpochMillis) }
         } else {
             marketRepository.getStocks(listOf(reference), "1y", forceRefresh)
-                .items.firstOrNull()?.value?.toFundPanel(fallbackInstrument)
+                .items.firstOrNull()?.let { it.value.toFundPanel(fallbackInstrument, it.checkedAtEpochMillis) }
         }
     }
 
@@ -393,7 +398,7 @@ class DashboardActivity : Activity() {
             failed += batch.failedCount
             batch.items.firstOrNull()?.let { result ->
                 resolvedStockNamesBySymbol[symbol] = result.value.quote.name
-                stockPanelsById[symbol] = result.value.toPanels()
+                stockPanelsById[symbol] = result.value.toPanels(result.checkedAtEpochMillis)
                 applyStocks(
                     interleaveMainPanels(
                         stockIds.mapNotNull(stockPanelsById::get),
@@ -424,14 +429,15 @@ class DashboardActivity : Activity() {
         val results = instruments.map { instrument ->
             async {
                 instrument to marketRepository.getJapanStocks(listOf(instrument.symbol))
-                    .items.firstOrNull()?.value
+                    .items.firstOrNull()
             }
         }.awaitAll()
-        results.forEach { (instrument, snapshot) ->
+        results.forEach { (instrument, loaded) ->
             if (!started) return@coroutineScope
-            snapshot?.let {
-                resolvedStockNamesBySymbol[instrument.symbol] = it.quote.name
-                stockPanelsById[instrument.symbol] = it.toJapanStockPanels(instrument.displayName)
+            loaded?.let {
+                resolvedStockNamesBySymbol[instrument.symbol] = it.value.quote.name
+                stockPanelsById[instrument.symbol] =
+                    it.value.toJapanStockPanels(instrument.displayName, it.checkedAtEpochMillis)
             }
         }
         if (started) {
@@ -458,7 +464,7 @@ class DashboardActivity : Activity() {
             loaded += batch.items
             failed += batch.failedCount
             batch.items.firstOrNull()?.let { result ->
-                marketPanelsById[id] = result.value.toPanelData(marketDisplayNamesById[id])
+                marketPanelsById[id] = result.value.toPanelData(marketDisplayNamesById[id], result.checkedAtEpochMillis)
                 val panels = marketIds.mapNotNull(marketPanelsById::get)
                 applyMarkets(panels, intervalMillis)
             }
@@ -700,6 +706,33 @@ class DashboardActivity : Activity() {
     private fun rotationPhaseOffset(intervalMillis: Long, offsetMillis: Long): Long =
         if (intervalMillis == DEBUG_ROTATION_INTERVAL_MILLIS) 0L else offsetMillis
 
+    private fun nextRefreshDelayMillis(mode: DataRefreshMode): Long {
+        if (mode == DataRefreshMode.DEBUG) return 60_000L
+        val checkpoints = when (mode) {
+            DataRefreshMode.CLOSE_ONLY -> listOf(8 * 60, 8 * 60 + 20, 12 * 60, 15 * 60 + 45, 16 * 60, 20 * 60)
+            DataRefreshMode.JAPAN_INTRADAY -> listOf(
+                8 * 60, 8 * 60 + 20, 9 * 60 + 5, 10 * 60 + 5, 11 * 60 + 35,
+                12 * 60, 12 * 60 + 35, 13 * 60 + 35, 14 * 60 + 35, 15 * 60 + 45,
+                16 * 60, 20 * 60,
+            )
+            DataRefreshMode.FOUR_HOURS -> listOf(8 * 60, 12 * 60, 16 * 60, 20 * 60)
+            DataRefreshMode.DEBUG -> return 60_000L
+        }
+        val now = System.currentTimeMillis()
+        val calendar = Calendar.getInstance(JST).apply { timeInMillis = now }
+        val minuteOfDay = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
+        val nextMinutes = checkpoints.firstOrNull { it > minuteOfDay }
+        calendar.apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+            if (nextMinutes == null) add(Calendar.DAY_OF_YEAR, 1)
+            add(Calendar.MINUTE, nextMinutes ?: checkpoints.first())
+        }
+        return (calendar.timeInMillis - now).coerceAtLeast(1_000L)
+    }
+
     @Suppress("DEPRECATION")
     private fun applySystemSettings(
         settings: com.digihori.marketpanel.data.settings.MarketPanelSettings,
@@ -742,5 +775,6 @@ class DashboardActivity : Activity() {
         const val NIGHT_CHECK_INTERVAL_MILLIS = 15_000L
         const val NIGHT_PREVIEW_MILLIS = 30_000L
         const val NIGHT_SCREEN_BRIGHTNESS = 0.01f
+        val JST: TimeZone = TimeZone.getTimeZone("Asia/Tokyo")
     }
 }

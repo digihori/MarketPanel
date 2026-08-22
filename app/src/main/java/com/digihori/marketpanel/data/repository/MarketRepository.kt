@@ -4,6 +4,7 @@ import com.digihori.marketpanel.data.local.MarketCacheDataSource
 import com.digihori.marketpanel.data.provider.StockDataProvider
 import com.digihori.marketpanel.domain.model.MarketSnapshot
 import com.digihori.marketpanel.domain.model.StockSnapshot
+import com.digihori.marketpanel.data.settings.DataRefreshMode
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.supervisorScope
@@ -14,10 +15,15 @@ import java.util.concurrent.ConcurrentHashMap
 class MarketRepository(
     private val provider: StockDataProvider,
     private val cache: MarketCacheDataSource,
-    private val quoteLifetimeMillis: Long = 4 * 60 * 60 * 1_000L,
-    private val chartLifetimeMillis: Long = 24 * 60 * 60 * 1_000L,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
+    @Volatile
+    private var refreshMode: DataRefreshMode = DataRefreshMode.FOUR_HOURS
+
+    fun setRefreshMode(mode: DataRefreshMode) {
+        refreshMode = mode
+    }
+
     private val requestLocks = ConcurrentHashMap<String, Mutex>()
     suspend fun getStocks(
         symbols: List<String>,
@@ -71,12 +77,12 @@ class MarketRepository(
     ): LoadedValue<StockSnapshot>? {
         val cached = cache.findStock(symbol, range)
         val currentTime = now()
-        val quoteIsFresh = cached != null && currentTime - cached.fetchedAtEpochMillis < quoteLifetimeMillis
+        val quoteIsFresh = cached != null && MarketRefreshPolicy.usStockFresh(cached.fetchedAtEpochMillis, currentTime, refreshMode)
         val chartIsFresh = cached != null &&
-            currentTime - cached.secondaryFetchedAtEpochMillis < chartLifetimeMillis &&
+            MarketRefreshPolicy.usStockFresh(cached.secondaryFetchedAtEpochMillis, currentTime, refreshMode) &&
             cached.value.longTerm.isNotEmpty()
         if (quoteIsFresh && chartIsFresh) {
-            return LoadedValue(cached.value, DataOrigin.CACHE_FRESH)
+            return LoadedValue(cached.value, DataOrigin.CACHE_FRESH, cached.fetchedAtEpochMillis)
         }
         val fetchedQuote = if (quoteIsFresh) null else
             runCatching { provider.getQuote(symbol) }.getOrNull()
@@ -106,7 +112,7 @@ class MarketRepository(
         else if ((!quoteIsFresh && fetchedQuote == null) || (!chartIsFresh && fetchedChart == null)) {
             DataOrigin.CACHE_STALE
         } else DataOrigin.NETWORK
-        return LoadedValue(snapshot, origin)
+        return LoadedValue(snapshot, origin, quoteFetchedAt)
     }
 
     private suspend fun getMarket(
@@ -117,15 +123,15 @@ class MarketRepository(
     }
 
     private suspend fun getMarketUnlocked(id: String, forceRefresh: Boolean): LoadedValue<MarketSnapshot>? {
-        val cacheId = "market:history-v4:$id"
+        val cacheId = "market:history-v6:$id"
         val cached = cache.findMarket(cacheId)
-        if (cached != null && now() - cached.fetchedAtEpochMillis < quoteLifetimeMillis) {
-            return LoadedValue(cached.value, DataOrigin.CACHE_FRESH)
+        if (cached != null && MarketRefreshPolicy.marketFresh(id, cached.fetchedAtEpochMillis, now(), refreshMode)) {
+            return LoadedValue(cached.value, DataOrigin.CACHE_FRESH, cached.fetchedAtEpochMillis)
         }
         return runCatching { provider.getMarketIndicator(id) }
             .onSuccess { cache.saveMarket(cacheId, it, now()) }
-            .getOrNull()?.let { LoadedValue(it, DataOrigin.NETWORK) }
-            ?: cached?.value?.let { LoadedValue(it, DataOrigin.CACHE_STALE) }
+            .getOrNull()?.let { LoadedValue(it, DataOrigin.NETWORK, now()) }
+            ?: cached?.let { LoadedValue(it.value, DataOrigin.CACHE_STALE, it.fetchedAtEpochMillis) }
     }
 
     private suspend fun getFund(
@@ -134,13 +140,13 @@ class MarketRepository(
     ): LoadedValue<MarketSnapshot>? = requestLocks.getOrPut("fund:$id") { Mutex() }.withLock {
         val cacheId = "fund:history-v2:$id"
         val cached = cache.findMarket(cacheId)
-        if (cached != null && now() - cached.fetchedAtEpochMillis < chartLifetimeMillis) {
-            return@withLock LoadedValue(cached.value, DataOrigin.CACHE_FRESH)
+        if (cached != null && MarketRefreshPolicy.fundFresh(cached.fetchedAtEpochMillis, now(), refreshMode)) {
+            return@withLock LoadedValue(cached.value, DataOrigin.CACHE_FRESH, cached.fetchedAtEpochMillis)
         }
         runCatching { provider.getFund(id) }
             .onSuccess { cache.saveMarket(cacheId, it, now()) }
-            .getOrNull()?.let { LoadedValue(it, DataOrigin.NETWORK) }
-            ?: cached?.value?.let { LoadedValue(it, DataOrigin.CACHE_STALE) }
+            .getOrNull()?.let { LoadedValue(it, DataOrigin.NETWORK, now()) }
+            ?: cached?.let { LoadedValue(it.value, DataOrigin.CACHE_STALE, it.fetchedAtEpochMillis) }
     }
 
     private suspend fun getJapanStock(
@@ -149,13 +155,13 @@ class MarketRepository(
     ): LoadedValue<MarketSnapshot>? = requestLocks.getOrPut("jp-stock:$symbol") { Mutex() }.withLock {
         val cacheId = "jp-stock:history-v4:$symbol"
         val cached = cache.findMarket(cacheId)
-        if (cached != null && now() - cached.fetchedAtEpochMillis < quoteLifetimeMillis) {
-            return@withLock LoadedValue(cached.value, DataOrigin.CACHE_FRESH)
+        if (cached != null && MarketRefreshPolicy.japanFresh(cached.fetchedAtEpochMillis, now(), refreshMode)) {
+            return@withLock LoadedValue(cached.value, DataOrigin.CACHE_FRESH, cached.fetchedAtEpochMillis)
         }
         runCatching { provider.getJapanStock(symbol) }
             .onSuccess { cache.saveMarket(cacheId, it, now()) }
-            .getOrNull()?.let { LoadedValue(it, DataOrigin.NETWORK) }
-            ?: cached?.value?.let { LoadedValue(it, DataOrigin.CACHE_STALE) }
+            .getOrNull()?.let { LoadedValue(it, DataOrigin.NETWORK, now()) }
+            ?: cached?.let { LoadedValue(it.value, DataOrigin.CACHE_STALE, it.fetchedAtEpochMillis) }
     }
 }
 
@@ -168,6 +174,7 @@ enum class DataOrigin {
 data class LoadedValue<T>(
     val value: T,
     val origin: DataOrigin,
+    val checkedAtEpochMillis: Long,
 )
 
 data class LoadBatch<T>(

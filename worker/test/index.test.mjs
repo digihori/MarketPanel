@@ -147,6 +147,23 @@ test("maps added market indicators to free-plan proxies", async () => {
   }
 });
 
+test("maps USDJPY as a yen exchange rate instead of a dollar price", async () => {
+  const responses = [
+    { symbol: "USD/JPY", currency_base: "USD", currency_quote: "JPY", currency: "USD", close: "147.50", change: "0.2", percent_change: "0.14" },
+    { values: [{ datetime: "2026-08-20 00:00:00", close: "147.50" }] },
+  ];
+  const response = await handleRequest(
+    new Request("https://api.example/v1/markets/USDJPY"),
+    env,
+    memoryCache(),
+    async () => upstream(responses.shift()),
+  );
+
+  const body = await response.json();
+  assert.equal(body.quote.currency, "RATE");
+  assert.equal(body.quote.price, 147.5);
+});
+
 test("maps the actual VIX index from Yahoo without using Twelve Data", async () => {
   const requestedUrls = [];
   const response = await handleRequest(
@@ -331,10 +348,10 @@ test("serves a quote from persistent KV across empty edge caches", async () => {
 
   assert.equal(calls, 1);
   assert.equal(response.headers.get("x-marketpanel-cache"), "KV");
-  assert.equal(kv.lastExpirationTtl, 14400);
+  assert.equal(kv.lastExpirationTtl, 72000);
 });
 
-test("stores weekly charts in KV for 24 hours", async () => {
+test("stores weekly charts in KV for 20 hours", async () => {
   const kv = memoryKv();
   await handleRequest(
     new Request("https://api.example/v1/charts/IBM?range=1y&interval=1wk"),
@@ -343,7 +360,7 @@ test("stores weekly charts in KV for 24 hours", async () => {
     async () => upstream({ values: [{ datetime: "2026-08-15 00:00:00", close: "234" }] }),
   );
 
-  assert.equal(kv.lastExpirationTtl, 86400);
+  assert.equal(kv.lastExpirationTtl, 72000);
 });
 
 function upstream(body) {

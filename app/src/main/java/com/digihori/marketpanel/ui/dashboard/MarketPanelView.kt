@@ -244,6 +244,7 @@ class MarketPanelView @JvmOverloads constructor(
         return when (unit) {
             "USD" -> "\$$formatted"
             "JPY" -> "¥$formatted"
+            "RATE" -> "¥$formatted"
             "PCT" -> "$formatted%"
             else -> formatted
         }
@@ -252,7 +253,7 @@ class MarketPanelView @JvmOverloads constructor(
     private fun axisTitle(unit: String): String = when (unit) {
         "USD" -> "価格（USD）"
         "JPY" -> "価格（円）"
-        "RATE" -> "為替レート"
+        "RATE" -> "為替レート（円/米ドル）"
         "PCT" -> "予想変動率（年率）"
         else -> "指数値"
     }

@@ -31,9 +31,10 @@ class ApiRetryPolicy(
         val old = read(key)
         val failures = old.consecutiveFailures + 1
         val blockedUntil = when {
-            status == 400 || status == 404 -> nextLocalMidnight(now())
-            failures >= MAX_CONSECUTIVE_FAILURES -> now() + SIX_HOURS_MILLIS
-            else -> 0L
+            status == 400 || status == 404 || status == 429 -> nextLocalMidnight(now())
+            failures == 1 -> now() + FIFTEEN_MINUTES_MILLIS
+            failures == 2 -> now() + ONE_HOUR_MILLIS
+            else -> nextLocalMidnight(now())
         }
         preferences.edit().putString(key, "$failures|$blockedUntil").apply()
     }
@@ -64,8 +65,8 @@ class ApiRetryPolicy(
 
     private companion object {
         const val PREFERENCES_NAME = "api_retry_policy"
-        const val MAX_CONSECUTIVE_FAILURES = 3
-        const val SIX_HOURS_MILLIS = 6 * 60 * 60 * 1_000L
+        const val FIFTEEN_MINUTES_MILLIS = 15 * 60 * 1_000L
+        const val ONE_HOUR_MILLIS = 60 * 60 * 1_000L
     }
 }
 

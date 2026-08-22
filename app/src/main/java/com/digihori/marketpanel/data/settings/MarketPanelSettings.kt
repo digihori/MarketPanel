@@ -3,6 +3,7 @@ package com.digihori.marketpanel.data.settings
 data class MarketPanelSettings(
     val rotationIntervalMillis: Long = 60_000L,
     val updateIntervalMillis: Long = 5 * 60_000L,
+    val dataRefreshMode: DataRefreshMode = DataRefreshMode.CLOSE_ONLY,
     val chartPeriod: String = "1年・週足",
     val enabledStocks: Set<String> = DEFAULT_STOCKS,
     val enabledFunds: Set<String> = DEFAULT_FUNDS,

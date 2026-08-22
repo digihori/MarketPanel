@@ -40,11 +40,13 @@ export async function handleRequest(request, env, cache, fetchImpl, context = nu
   const url = new URL(request.url);
   const parts = url.pathname.split("/").filter(Boolean);
   const historyCacheVersion = parts[0] === "v1" && parts[1] === "markets"
-    ? "history-v4"
+    ? "history-v6"
     : parts[0] === "v1" && parts[1] === "jp-stocks"
-      ? "history-v4"
+      ? "history-v5"
       : parts[0] === "v1" && parts[1] === "funds"
-      ? "history-v2"
+      ? "history-v3"
+      : parts[0] === "v1" && (parts[1] === "quotes" || parts[1] === "charts")
+      ? "eod-v1"
       : "";
   const cacheUrl = new URL(request.url);
   if (historyCacheVersion) cacheUrl.searchParams.set("__marketpanel_cache", historyCacheVersion);
@@ -93,9 +95,13 @@ export async function handleRequest(request, env, cache, fetchImpl, context = nu
 }
 
 function kvTtl(parts) {
-  if (parts[1] === "charts") return 24 * 60 * 60;
-  if (parts[1] === "funds") return 24 * 60 * 60;
-  if (parts[1] === "quotes" || parts[1] === "markets" || parts[1] === "jp-stocks") return 4 * 60 * 60;
+  if (parts[1] === "charts" || parts[1] === "funds" || parts[1] === "quotes") return 20 * 60 * 60;
+  if (parts[1] === "jp-stocks") return 30 * 60;
+  if (parts[1] === "markets") {
+    if (parts[2] === "NIKKEI225") return 30 * 60;
+    if (parts[2] === "USDJPY") return 4 * 60 * 60;
+    return 20 * 60 * 60;
+  }
   if (parts[1] === "usage") return 60 * 60;
   return 5 * 60;
 }
@@ -175,6 +181,7 @@ async function marketResponse(id, env, fetchImpl) {
   ]);
   const mappedQuote = mapQuote(quote, id);
   mappedQuote.name = MARKET_NAMES[id] || mappedQuote.name;
+  if (id === "USDJPY") mappedQuote.currency = "RATE";
   return apiJson(
     {
       id,

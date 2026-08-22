@@ -7,7 +7,7 @@
     <string name="settings_title">MarketPanel 設定</string>
     <string name="rotation_interval">表示切替周期</string>
     <string name="main_chart_period">MAINチャート期間</string>
-    <string name="data_update_interval">データ更新間隔</string>
+    <string name="data_update_interval">データ取得モード</string>
     <string name="stocks_to_show">米国株・ETF／国内ETF</string>
     <string name="funds_to_show">国内投信</string>
     <string name="markets_to_show">表示する市場指標</string>

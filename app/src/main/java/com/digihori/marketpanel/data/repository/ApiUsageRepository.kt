@@ -8,8 +8,13 @@ class ApiUsageRepository(
     private val demoMode: Boolean,
     private val creditPacer: ApiCreditPacer,
 ) {
+    private var cachedText: String? = null
+    private var cachedAtMillis: Long = 0L
+
     suspend fun displayText(): String = if (demoMode) {
         "API DEMO"
+    } else if (cachedText != null && System.currentTimeMillis() - cachedAtMillis < CACHE_MILLIS) {
+        cachedText!!
     } else {
         runCatching {
             creditPacer.acquire(1)
@@ -17,5 +22,13 @@ class ApiUsageRepository(
         }
             .map { "API ${it.dailyUsage} / ${it.dailyLimit}" }
             .getOrDefault("API -- / 800")
+            .also {
+                cachedText = it
+                cachedAtMillis = System.currentTimeMillis()
+            }
+    }
+
+    private companion object {
+        const val CACHE_MILLIS = 4 * 60 * 60 * 1_000L
     }
 }

@@ -52,6 +52,9 @@ class SettingsStore(private val context: Context) {
             MarketPanelSettings(
                 rotationIntervalMillis = preferences[ROTATION_INTERVAL] ?: 60_000L,
                 updateIntervalMillis = preferences[UPDATE_INTERVAL] ?: 5 * 60_000L,
+                dataRefreshMode = preferences[DATA_REFRESH_MODE]
+                    ?.let { runCatching { DataRefreshMode.valueOf(it) }.getOrNull() }
+                    ?: DataRefreshMode.CLOSE_ONLY,
                 chartPeriod = preferences[CHART_PERIOD] ?: "1年・週足",
                 enabledStocks = legacyStocks,
                 enabledFunds = preferences[ENABLED_FUNDS] ?: MarketPanelSettings.DEFAULT_FUNDS,
@@ -78,6 +81,7 @@ class SettingsStore(private val context: Context) {
         context.marketPanelDataStore.edit { preferences ->
             preferences[ROTATION_INTERVAL] = settings.rotationIntervalMillis
             preferences[UPDATE_INTERVAL] = settings.updateIntervalMillis
+            preferences[DATA_REFRESH_MODE] = settings.dataRefreshMode.name
             preferences[CHART_PERIOD] = settings.chartPeriod
             preferences[ENABLED_STOCKS] = settings.enabledStocks
             preferences[ENABLED_FUNDS] = settings.enabledFunds
@@ -96,6 +100,7 @@ class SettingsStore(private val context: Context) {
     private companion object {
         val ROTATION_INTERVAL = longPreferencesKey("rotation_interval_millis")
         val UPDATE_INTERVAL = longPreferencesKey("update_interval_millis")
+        val DATA_REFRESH_MODE = stringPreferencesKey("data_refresh_mode")
         val CHART_PERIOD = stringPreferencesKey("chart_period")
         val ENABLED_STOCKS = stringSetPreferencesKey("enabled_stocks")
         val ENABLED_FUNDS = stringSetPreferencesKey("enabled_funds")
